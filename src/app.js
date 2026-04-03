@@ -1,44 +1,57 @@
+// src/app.js
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
-const env = require('./config/env');
 const logger = require('./config/logger');
-
-// Import routes
-const authRoutes = require('./modules/auth/auth.routes');
-const vehicleRoutes = require('./modules/vehicles/vehicle.routes');
-const errorMiddleware = require('./shared/middlewares/error.middleware');
-
+const env = require('./config/env');
+// No topo do arquivo, após os imports
+const mongoose = require('mongoose');
 const app = express();
 
-// Security middlewares
-app.use(helmet());
+// ✅ CONFIGURAÇÃO CORRETA DE CORS
+const allowedOrigins = [
+  'https://mediato-nexus-ai.lovable.app',
+  'http://localhost:5173',
+  'http://localhost:3000'
+];
+
 app.use(cors({
-  origin: env.FRONTEND_URL || 'http://localhost:5173',
-  credentials: true
+  origin: function(origin, callback) {
+    // Permite requisições sem origin (como mobile apps ou curl)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.warn(`CORS bloqueado para origem: ${origin}`);
+      callback(null, false);
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
+
+// Outros middlewares
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
+app.use(compression());
+app.use(express.json({ limit: '10mb' }));
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 100, // 100 requests por IP
-  message: {
-    success: false,
-    error: 'Muitas requisições, tente novamente mais tarde'
-  }
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: { success: false, error: 'Muitas requisições, tente novamente mais tarde' }
 });
-app.use('/api/', limiter);
+app.use('/api', limiter);
 
-// Body parsing
-app.use(compression());
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
-
-// Request logging
+// Logging
 app.use((req, res, next) => {
-  logger.info(`${req.method} ${req.path} - ${req.ip}`);
+  logger.debug(`${req.method} ${req.path} - Origin: ${req.headers.origin}`);
   next();
 });
 
@@ -46,24 +59,24 @@ app.use((req, res, next) => {
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'ok', 
-    timestamp: new Date().toISOString(),
-    version: '2.0.0'
+    timestamp: new Date(),
+    uptime: process.uptime(),
+    mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
   });
 });
 
-// API Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/vehicles', vehicleRoutes);
+// Routes
+app.use('/api/auth', require('./modules/auth/auth.routes'));
+app.use('/api/vehicles', require('./modules/vehicles/vehicle.routes'));
+app.use('/api/leads', require('./modules/leads/lead.routes'));
 
 // 404 handler
 app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    error: 'Rota não encontrada'
-  });
+  res.status(404).json({ success: false, error: 'Rota não encontrada' });
 });
 
-// Error handler (sempre por último)
+// Error handler
+const errorMiddleware = require('./shared/middlewares/error.middleware');
 app.use(errorMiddleware);
 
 module.exports = app;
