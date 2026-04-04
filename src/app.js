@@ -7,17 +7,23 @@ const logger = require('./config/logger');
 
 const app = express();
 
-// ── CORS simplificado (sem validação de origem para testes) ──
+// ── CORS DEFINITIVO (resolvido) ──────────────────────────────
+// Permitir todas as origens temporariamente para testes
 app.use(cors({
-  origin: true, // Aceita qualquer origem temporariamente
-  credentials: true,
+  origin: '*',
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+  exposedHeaders: ['Content-Length', 'X-Requested-With'],
+  credentials: false, // Mudar para true se precisar de cookies, mas com origin '*' não funciona
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 }));
 
-// ── Segurança e performance ──────────────────────────────────
+// ── Segurança (relaxada para testes) ─────────────────────────
 app.use(helmet({
-  crossOriginResourcePolicy: { policy: 'cross-origin' }
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  crossOriginOpenerPolicy: false,
+  crossOriginEmbedderPolicy: false
 }));
 app.use(compression());
 
@@ -33,7 +39,7 @@ app.use('/api/', limiter);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// ── Logging de requisições ────────────────────────────────────
+// ── Logging ──────────────────────────────────────────────────
 app.use((req, res, next) => {
   logger.debug(`${req.method} ${req.path}`);
   next();
@@ -48,7 +54,7 @@ app.get('/health', (req, res) => {
   });
 });
 
-// ── Rotas da API ──────────────────────────────────────────────
+// ── Rotas da API (simplificadas e todas em um arquivo) ───────
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
@@ -107,6 +113,8 @@ app.post('/api/auth/register', async (req, res) => {
   try {
     const { name, email, password } = req.body;
     
+    console.log('📝 Registro recebido:', { name, email });
+    
     if (!name || !email || !password) {
       return res.status(400).json({ success: false, error: 'Nome, email e senha são obrigatórios' });
     }
@@ -120,19 +128,23 @@ app.post('/api/auth/register', async (req, res) => {
     const user = new User({ name, email, password: hashedPassword });
     await user.save();
     
+    console.log('✅ Usuário criado:', user._id);
+    
     res.status(201).json({ 
       success: true, 
       data: { id: user._id, name: user.name, email: user.email } 
     });
   } catch (error) {
-    logger.error('Register error:', error);
-    res.status(500).json({ success: false, error: 'Erro ao criar usuário' });
+    console.error('❌ Register error:', error);
+    res.status(500).json({ success: false, error: 'Erro ao criar usuário: ' + error.message });
   }
 });
 
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
+    
+    console.log('🔐 Login recebido:', { email });
     
     const user = await User.findOne({ email });
     if (!user) {
@@ -146,17 +158,19 @@ app.post('/api/auth/login', async (req, res) => {
     
     const token = jwt.sign(
       { id: user._id, email: user.email, name: user.name },
-      process.env.JWT_SECRET,
+      process.env.JWT_SECRET || 'temp_secret_change_this',
       { expiresIn: '7d' }
     );
+    
+    console.log('✅ Login bem-sucedido:', user._id);
     
     res.json({ 
       success: true, 
       data: { token, user: { id: user._id, name: user.name, email: user.email } } 
     });
   } catch (error) {
-    logger.error('Login error:', error);
-    res.status(500).json({ success: false, error: 'Erro ao fazer login' });
+    console.error('❌ Login error:', error);
+    res.status(500).json({ success: false, error: 'Erro ao fazer login: ' + error.message });
   }
 });
 
@@ -169,7 +183,7 @@ const authMiddleware = async (req, res, next) => {
     }
     
     const token = authHeader.replace('Bearer ', '');
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'temp_secret_change_this');
     req.user = decoded;
     next();
   } catch (error) {
@@ -183,7 +197,7 @@ app.get('/api/vehicles', authMiddleware, async (req, res) => {
     const vehicles = await Vehicle.find({ cadastradoPor: req.user.id }).sort({ createdAt: -1 });
     res.json({ success: true, data: vehicles });
   } catch (error) {
-    logger.error('List vehicles error:', error);
+    console.error('List vehicles error:', error);
     res.status(500).json({ success: false, error: 'Erro ao listar veículos' });
   }
 });
@@ -204,7 +218,7 @@ app.post('/api/vehicles', authMiddleware, async (req, res) => {
     await vehicle.save();
     res.status(201).json({ success: true, data: vehicle });
   } catch (error) {
-    logger.error('Create vehicle error:', error);
+    console.error('Create vehicle error:', error);
     res.status(500).json({ success: false, error: 'Erro ao criar veículo' });
   }
 });
@@ -224,7 +238,7 @@ app.patch('/api/vehicles/:id/status', authMiddleware, async (req, res) => {
     
     res.json({ success: true, data: vehicle });
   } catch (error) {
-    logger.error('Update status error:', error);
+    console.error('Update status error:', error);
     res.status(500).json({ success: false, error: 'Erro ao atualizar status' });
   }
 });
@@ -235,7 +249,7 @@ app.get('/api/leads', authMiddleware, async (req, res) => {
     const leads = await Lead.find({ criadoPor: req.user.id }).sort({ createdAt: -1 });
     res.json({ success: true, data: leads });
   } catch (error) {
-    logger.error('List leads error:', error);
+    console.error('List leads error:', error);
     res.status(500).json({ success: false, error: 'Erro ao listar leads' });
   }
 });
@@ -249,9 +263,17 @@ app.post('/api/leads', authMiddleware, async (req, res) => {
     await lead.save();
     res.status(201).json({ success: true, data: lead });
   } catch (error) {
-    logger.error('Create lead error:', error);
+    console.error('Create lead error:', error);
     res.status(500).json({ success: false, error: 'Erro ao criar lead' });
   }
+});
+
+// ── Rota de teste CORS ──────────────────────────────────────
+app.options('/api/*', (req, res) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.sendStatus(200);
 });
 
 // ── 404 handler ──────────────────────────────────────────────
@@ -261,7 +283,7 @@ app.use((req, res) => {
 
 // ── Error handler ──────────────────────────────────────────────
 app.use((err, req, res, next) => {
-  logger.error(err.stack);
+  console.error('❌ Erro:', err.stack);
   res.status(err.status || 500).json({
     success: false,
     error: process.env.NODE_ENV === 'production' ? 'Erro interno do servidor' : err.message
