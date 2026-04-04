@@ -10,11 +10,11 @@ const logger = winston.createLogger({
   defaultMeta: { service: 'mediatio-api' },
   transports: [
     new winston.transports.Console({
-      format:
-        process.env.NODE_ENV === 'development'
-          ? winston.format.combine(winston.format.colorize(), winston.format.simple())
-          : winston.format.json(),
-    }),
+      format: winston.format.combine(
+        winston.format.colorize(),
+        winston.format.simple()
+      )
+    })
   ],
 });
 
