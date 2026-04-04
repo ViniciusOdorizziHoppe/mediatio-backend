@@ -1,44 +1,24 @@
 const jwt = require('jsonwebtoken');
 const env = require('../../config/env');
-const logger = require('../../config/logger');
+const { error } = require('../utils/api-response');
 
-const authMiddleware = (req, res, next) => {
+const auth = (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
-    
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({
-        success: false,
-        error: 'Token de autenticação não fornecido'
-      });
+      return res.status(401).json(error('Token não fornecido'));
     }
 
-    const token = authHeader.substring(7);
-    
+    const token = authHeader.replace('Bearer ', '');
     const decoded = jwt.verify(token, env.JWT_SECRET);
-    
-    req.user = {
-      id: decoded.id,
-      email: decoded.email,
-      role: decoded.role
-    };
-    
+    req.user = decoded;
     next();
-  } catch (error) {
-    logger.error('Auth middleware error:', error.message);
-    
-    if (error.name === 'TokenExpiredError') {
-      return res.status(401).json({
-        success: false,
-        error: 'Token expirado'
-      });
+  } catch (err) {
+    if (err.name === 'TokenExpiredError') {
+      return res.status(401).json(error('Token expirado'));
     }
-    
-    return res.status(401).json({
-      success: false,
-      error: 'Token inválido'
-    });
+    return res.status(401).json(error('Token inválido'));
   }
 };
 
-module.exports = authMiddleware;
+module.exports = auth;

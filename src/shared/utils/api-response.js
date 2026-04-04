@@ -1,18 +1,23 @@
-const success = (data, meta = {}) => ({
+/**
+ * Padronização de respostas da API
+ */
+
+const success = (data, extras = {}) => ({
   success: true,
   data,
-  ...meta,
-  timestamp: new Date().toISOString()
+  ...extras,
 });
 
-const error = (message, details = null) => ({
+const error = (message, statusCode = 500, details = null) => ({
   success: false,
   error: message,
   ...(details && { details }),
-  timestamp: new Date().toISOString()
 });
 
-module.exports = {
-  success,
-  error
-};
+const paginated = (data, meta) => ({
+  success: true,
+  data,
+  meta,
+});
+
+module.exports = { success, error, paginated };

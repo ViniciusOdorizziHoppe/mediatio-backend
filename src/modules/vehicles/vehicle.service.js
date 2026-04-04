@@ -1,148 +1,208 @@
 const VehicleRepository = require('./vehicle.repository');
 const ScoreCalculator = require('./vehicle.score');
-const FipeService = require('../integrations/fipe/fipe.service');
+const { uploadToCloudinary, deleteFromCloudinary, getThumbnailUrl } = require('../../shared/middlewares/upload.middleware');
 const logger = require('../../config/logger');
 
 class VehicleService {
-  constructor() {
-    this.repository = VehicleRepository;
-    this.fipeService = FipeService;
+  async list(filters, options) {
+    return VehicleRepository.findAll(filters, options);
   }
-  
-  async listVehicles(filters, options) {
-    try {
-      return await this.repository.findAll(filters, options);
-    } catch (error) {
-      logger.error('Erro ao listar veículos:', error);
-      throw new Error('Falha ao recuperar lista de veículos');
+
+  async getById(id) {
+    const vehicle = await VehicleRepository.findById(id);
+    if (!vehicle) {
+      const err = new Error('Veículo não encontrado');
+      err.statusCode = 404;
+      throw err;
     }
-  }
-  
-  async getVehicleById(id) {
-    const vehicle = await this.repository.findById(id);
-    if (!vehicle) throw new Error('Veículo não encontrado');
     return vehicle;
   }
-  
-  async createVehicle(data, userId) {
-    try {
-      // Gera código automático: MOTO-2025-0001
-      const count = await this.repository.countDocuments({ tipo: data.tipo });
-      const year = new Date().getFullYear();
-      const prefix = data.tipo === 'moto' ? 'MOTO' : 'CARRO';
-      const codigo = `${prefix}-${year}-${String(count + 1).padStart(4, '0')}`;
-      
-      // Busca FIPE automaticamente se tiver dados suficientes
-      let fipeData = {};
-      if (data.marca && data.modelo && data.ano) {
-        try {
-          fipeData = await this.fipeService.buscarPreco(
-            data.tipo, 
-            data.marca, 
-            data.modelo, 
-            data.ano
-          );
-        } catch (err) {
-          logger.warn('FIPE não encontrado, continuando sem referência:', err.message);
-        }
-      }
-      
-      const vehicleData = {
-        ...data,
-        codigo,
-        cadastradoPor: userId,
-        precos: {
-          ...data.precos,
-          fipeReferencia: fipeData.preco,
-          fipeMesReferencia: fipeData.mesReferencia
-        }
-      };
-      
-      // Calcula score inicial
-      const calculator = new ScoreCalculator(vehicleData);
-      vehicleData.score = calculator.calcular();
-      
-      const vehicle = await this.repository.create(vehicleData);
-      
-      logger.info(`Veículo criado: ${vehicle.codigo} por ${userId}`);
-      return vehicle;
-      
-    } catch (error) {
-      logger.error('Erro ao criar veículo:', error);
-      throw error;
-    }
+
+  async create(data, userId) {
+    // Gera código automático: MOTO-2025-0001 / CARRO-2025-0001
+    const count = await VehicleRepository.countDocuments({ tipo: data.tipo });
+    const year = new Date().getFullYear();
+    const prefix = data.tipo === 'moto' ? 'MOTO' : 'CARRO';
+    const codigo = `${prefix}-${year}-${String(count + 1).padStart(4, '0')}`;
+
+    const vehicleData = {
+      ...data,
+      codigo,
+      cadastradoPor: userId,
+    };
+
+    // Score inicial
+    const calculator = new ScoreCalculator(vehicleData);
+    vehicleData.score = calculator.calcular();
+
+    const vehicle = await VehicleRepository.create(vehicleData);
+    logger.info(`Veículo criado: ${vehicle.codigo} por usuário ${userId}`);
+    return vehicle;
   }
-  
-  async updateVehicle(id, updateData, userId) {
-    // Recalcula score se dados relevantes mudaram
-    const needsRecalc = this.checkIfNeedsScoreRecalculation(updateData);
-    
-    const vehicle = await this.repository.update(id, {
-      ...updateData,
-      atualizadoPor: userId
+
+  async update(id, data, userId) {
+    const vehicle = await VehicleRepository.update(id, {
+      ...data,
+      atualizadoPor: userId,
     });
-    
-    if (needsRecalc) {
-      await this.recalculateScore(id);
+
+    if (!vehicle) {
+      const err = new Error('Veículo não encontrado');
+      err.statusCode = 404;
+      throw err;
     }
-    
+
+    // Recalcula score sempre que veículo é atualizado
+    await this.recalculateScore(id);
+    return VehicleRepository.findById(id);
+  }
+
+  async updateStatus(id, status, userId) {
+    const vehicle = await VehicleRepository.updateStatus(id, status);
+    if (!vehicle) {
+      const err = new Error('Veículo não encontrado');
+      err.statusCode = 404;
+      throw err;
+    }
+    logger.info(`Status atualizado: ${id} → ${status}`);
     return vehicle;
   }
-  
-  async updateStatus(id, status, userId) {
-    logger.info(`Status alterado: ${id} → ${status} por ${userId}`);
-    return this.repository.updateStatus(id, status);
+
+  async delete(id) {
+    return VehicleRepository.delete(id);
   }
-  
+
   async recalculateScore(id) {
-    const vehicle = await this.repository.findById(id);
-    if (!vehicle) throw new Error('Veículo não encontrado');
-    
+    const vehicle = await VehicleRepository.findById(id);
+    if (!vehicle) return null;
+
     const calculator = new ScoreCalculator(vehicle);
     const newScore = calculator.calcular();
-    
-    await this.repository.update(id, { score: newScore });
+    await VehicleRepository.updateScore(id, newScore);
     return newScore;
   }
-  
-  checkIfNeedsScoreRecalculation(data) {
-    const relevantFields = [
-      'fotos', 'condicoes', 'precos', 'anuncio', 
-      'pipeline', 'proprietario'
-    ];
-    return Object.keys(data).some(key => 
-      relevantFields.some(field => key.includes(field))
-    );
-  }
-  
-  async generateAdText(vehicleId) {
-    const vehicle = await this.getVehicleById(vehicleId);
-    
-    // Template engine simples (pode ser substituído por IA depois)
-    const { marca, modelo, ano, cor, km, precos, condicoes, proprietario } = vehicle;
-    
-    const whatsapp = `*${marca} ${modelo} ${ano}*\n` +
-      `🎨 Cor: ${cor}\n` +
-      `📊 KM: ${km?.toLocaleString('pt-BR')}\n` +
-      `💰 Valor: R$ ${precos?.venda?.toLocaleString('pt-BR')}\n` +
-      `${condicoes?.aceitaTroca ? '✅ Aceita troca\n' : ''}` +
-      `${condicoes?.aceitaFinanciamento ? '✅ Aceita financiamento\n' : ''}` +
-      `\n📍 ${proprietario?.cidade || 'Localização'}\n` +
-      `📱 Chama no WhatsApp!`;
-    
-    const facebook = `${marca} ${modelo} ${ano} - ${cor}\n\n` +
-      `Veículo em ótimo estado! ${km}km rodados.\n` +
-      `Preço justo: R$ ${precos?.venda?.toLocaleString('pt-BR')}\n\n` +
-      `${condicoes?.aceitaTroca ? 'Aceitamos seu veículo na troca! ' : ''}` +
-      `${condicoes?.aceitaFinanciamento ? 'Facilitamos financiamento. ' : ''}` +
-      `\nEntre em contato para mais fotos e informações.`;
-    
-    return {
-      whatsapp,
-      facebook,
-      instagram: whatsapp, // Mais curto para IG
-      metadata: { generatedAt: new Date(), version: '1.0' }
+
+  /**
+   * Upload de foto original do veículo para o Cloudinary
+   * Pasta: mediatio/vehicles/{codigo}/originais/
+   */
+  async uploadPhoto(vehicleId, fileBuffer, mimetype, originalname) {
+    const vehicle = await this.getById(vehicleId);
+
+    const ext = originalname.split('.').pop() || 'jpg';
+    const timestamp = Date.now();
+    const publicId = `${timestamp}`;
+    const folder = `mediatio/vehicles/${vehicle.codigo}/originais`;
+
+    const result = await uploadToCloudinary(fileBuffer, folder, publicId);
+    const thumbnailUrl = getThumbnailUrl(result.public_id, 400);
+
+    const fotoData = {
+      url: result.secure_url,
+      thumbnailUrl,
+      publicId: result.public_id,
+      formato: result.format,
+      bytes: result.bytes,
+      largura: result.width,
+      altura: result.height,
     };
+
+    // Se é a primeira foto, define como principal
+    const updatedVehicle = await VehicleRepository.addPhoto(vehicleId, fotoData, 'original');
+    if (!vehicle.fotos?.principal) {
+      await VehicleRepository.setPrincipalPhoto(vehicleId, result.secure_url, result.public_id);
+    }
+
+    // Recalcula score após nova foto
+    await this.recalculateScore(vehicleId);
+
+    logger.info(`Foto adicionada ao veículo ${vehicle.codigo}: ${result.public_id}`);
+    return fotoData;
+  }
+
+  /**
+   * Remove foto do veículo (Cloudinary + MongoDB)
+   */
+  async deletePhoto(vehicleId, photoId, publicId, tipo = 'original') {
+    // Remove do Cloudinary
+    if (publicId) {
+      await deleteFromCloudinary(publicId);
+    }
+
+    // Remove do banco
+    const vehicle = await VehicleRepository.removePhoto(vehicleId, photoId, tipo);
+
+    // Recalcula score
+    await this.recalculateScore(vehicleId);
+
+    return vehicle;
+  }
+
+  /**
+   * Define foto principal do veículo
+   */
+  async setPrincipalPhoto(vehicleId, url, publicId) {
+    return VehicleRepository.setPrincipalPhoto(vehicleId, url, publicId);
+  }
+
+  /**
+   * Gera textos de anúncio para WhatsApp, Facebook e Instagram
+   */
+  generateAdText(vehicle) {
+    const {
+      marca,
+      modelo,
+      ano,
+      cor,
+      km,
+      precos,
+      condicoes,
+      proprietario,
+      anuncio,
+    } = vehicle;
+
+    const kmFormatado = km?.toLocaleString('pt-BR') || '—';
+    const precoFormatado = precos?.venda?.toLocaleString('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
+    }) || '—';
+
+    const whatsapp =
+      `🏍️ *${marca} ${modelo} ${ano}*\n\n` +
+      `🎨 Cor: ${cor || '—'}\n` +
+      `📊 KM: ${kmFormatado}\n` +
+      `💰 Valor: ${precoFormatado}\n` +
+      (condicoes?.aceitaTroca ? `✅ Aceita troca\n` : '') +
+      (condicoes?.aceitaFinanciamento ? `✅ Aceita financiamento\n` : '') +
+      `📍 ${proprietario?.cidade || 'SC'}\n\n` +
+      (anuncio?.observacoes ? `📝 ${anuncio.observacoes}\n\n` : '') +
+      `📲 Entre em contato para mais informações!`;
+
+    const facebook =
+      `${marca} ${modelo} ${ano} | ${cor} | ${kmFormatado} km\n\n` +
+      `Veículo bem conservado, documentação em dia!\n\n` +
+      `💰 ${precoFormatado}\n` +
+      (condicoes?.aceitaTroca ? `↔️ Aceitamos seu veículo na troca\n` : '') +
+      (condicoes?.aceitaFinanciamento ? `💳 Financiamento disponível\n` : '') +
+      `\n📍 ${proprietario?.cidade || 'Região de Presidente Getúlio, SC'}\n` +
+      (anuncio?.observacoes ? `\n${anuncio.observacoes}\n` : '') +
+      `\nChame no WhatsApp! 👇`;
+
+    return { whatsapp, facebook, instagram: whatsapp };
+  }
+
+  async generateAd(vehicleId) {
+    const vehicle = await this.getById(vehicleId);
+    const texts = this.generateAdText(vehicle);
+
+    // Salva os textos no banco
+    await VehicleRepository.update(vehicleId, {
+      'anuncio.whatsappText': texts.whatsapp,
+      'anuncio.facebookText': texts.facebook,
+      'anuncio.instagramText': texts.instagram,
+    });
+
+    return texts;
   }
 }
 
