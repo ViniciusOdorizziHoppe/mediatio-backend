@@ -29,7 +29,6 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Permite chamadas sem origin (Postman, N8N, apps mobile, etc.)
       if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin)) return callback(null, true);
       logger.warn(`CORS bloqueou origem: ${origin}`);
@@ -40,6 +39,9 @@ app.use(
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   })
 );
+
+// ADICIONE ESTA LINHA AQUI (crucial para preflight):
+app.options('*', cors());
 
 // ── Segurança e performance ──────────────────────────────────
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
