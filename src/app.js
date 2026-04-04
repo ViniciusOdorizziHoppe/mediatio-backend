@@ -3,41 +3,17 @@ const helmet = require('helmet');
 const cors = require('cors');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
-const env = require('./config/env');
 const logger = require('./config/logger');
 
 const app = express();
 
-// ── CORS configurado corretamente ────────────────────────────────
-const allowedOrigins = [
-  'https://mediato-nexus-ai.lovable.app',
-  'https://mediatio-vehicle-nexus.vercel.app',
-  'http://localhost:5173',
-  'http://localhost:3000',
-  'http://localhost:5174',
-  process.env.FRONTEND_URL
-].filter(Boolean);
-
-// Middleware CORS
+// ── CORS simplificado (sem validação de origem para testes) ──
 app.use(cors({
-  origin: (origin, callback) => {
-    // Permite requisições sem origin (ex: mobile apps, curl)
-    if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      logger.warn(`CORS bloqueou origem: ${origin}`);
-      callback(null, false); // Não bloqueia com erro, só nega
-    }
-  },
+  origin: true, // Aceita qualquer origem temporariamente
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
 }));
-
-// Handle preflight requests
-app.options('*', cors());
 
 // ── Segurança e performance ──────────────────────────────────
 app.use(helmet({
@@ -59,7 +35,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // ── Logging de requisições ────────────────────────────────────
 app.use((req, res, next) => {
-  logger.debug(`${req.method} ${req.path} - Origin: ${req.headers.origin || 'unknown'}`);
+  logger.debug(`${req.method} ${req.path}`);
   next();
 });
 
@@ -73,22 +49,74 @@ app.get('/health', (req, res) => {
 });
 
 // ── Rotas da API ──────────────────────────────────────────────
-// Auth routes
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const mongoose = require('mongoose');
+
+// Modelos
+const UserSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  email: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now }
+});
+const User = mongoose.models.User || mongoose.model('User', UserSchema);
+
+const VehicleSchema = new mongoose.Schema({
+  codigo: String,
+  tipo: String,
+  marca: String,
+  modelo: String,
+  ano: Number,
+  cor: String,
+  km: Number,
+  precos: {
+    compra: Number,
+    venda: Number,
+    minimo: Number
+  },
+  condicoes: {
+    aceitaTroca: Boolean,
+    aceitaFinanciamento: Boolean,
+    documentacao: String
+  },
+  proprietario: {
+    nome: String,
+    whatsapp: String,
+    cidade: String
+  },
+  pipeline: {
+    status: { type: String, default: 'disponivel' },
+    dataEntrada: { type: Date, default: Date.now }
+  },
+  cadastradoPor: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
+}, { timestamps: true });
+const Vehicle = mongoose.models.Vehicle || mongoose.model('Vehicle', VehicleSchema);
+
+const LeadSchema = new mongoose.Schema({
+  nome: String,
+  whatsapp: String,
+  interesse: Object,
+  status: { type: String, default: 'novo' },
+  criadoPor: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
+}, { timestamps: true });
+const Lead = mongoose.models.Lead || mongoose.model('Lead', LeadSchema);
+
+// ── Auth Routes ──────────────────────────────────────────────
 app.post('/api/auth/register', async (req, res) => {
   try {
     const { name, email, password } = req.body;
     
     if (!name || !email || !password) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Nome, email e senha são obrigatórios' 
-      });
+      return res.status(400).json({ success: false, error: 'Nome, email e senha são obrigatórios' });
     }
     
-    const bcrypt = require('bcryptjs');
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(409).json({ success: false, error: 'Email já cadastrado' });
+    }
     
-    const User = require('./modules/auth/auth.model');
+    const hashedPassword = await bcrypt.hash(password, 10);
     const user = new User({ name, email, password: hashedPassword });
     await user.save();
     
@@ -97,9 +125,6 @@ app.post('/api/auth/register', async (req, res) => {
       data: { id: user._id, name: user.name, email: user.email } 
     });
   } catch (error) {
-    if (error.code === 11000) {
-      return res.status(409).json({ success: false, error: 'Email já cadastrado' });
-    }
     logger.error('Register error:', error);
     res.status(500).json({ success: false, error: 'Erro ao criar usuário' });
   }
@@ -108,9 +133,6 @@ app.post('/api/auth/register', async (req, res) => {
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    const bcrypt = require('bcryptjs');
-    const jwt = require('jsonwebtoken');
-    const User = require('./modules/auth/auth.model');
     
     const user = await User.findOne({ email });
     if (!user) {
@@ -138,43 +160,36 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// Vehicle routes
-app.get('/api/vehicles', async (req, res) => {
+// ── Middleware de autenticação ──────────────────────────────
+const authMiddleware = async (req, res, next) => {
   try {
-    const auth = req.headers.authorization;
-    if (!auth) {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({ success: false, error: 'Token não fornecido' });
     }
     
-    const jwt = require('jsonwebtoken');
-    const token = auth.replace('Bearer ', '');
+    const token = authHeader.replace('Bearer ', '');
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
-    const Vehicle = require('./modules/vehicles/vehicle.model');
-    const vehicles = await Vehicle.find({ cadastradoPor: decoded.id }).sort({ createdAt: -1 });
-    
+    req.user = decoded;
+    next();
+  } catch (error) {
+    return res.status(401).json({ success: false, error: 'Token inválido ou expirado' });
+  }
+};
+
+// ── Vehicle Routes ──────────────────────────────────────────
+app.get('/api/vehicles', authMiddleware, async (req, res) => {
+  try {
+    const vehicles = await Vehicle.find({ cadastradoPor: req.user.id }).sort({ createdAt: -1 });
     res.json({ success: true, data: vehicles });
   } catch (error) {
-    if (error.name === 'JsonWebTokenError') {
-      return res.status(401).json({ success: false, error: 'Token inválido' });
-    }
     logger.error('List vehicles error:', error);
     res.status(500).json({ success: false, error: 'Erro ao listar veículos' });
   }
 });
 
-app.post('/api/vehicles', async (req, res) => {
+app.post('/api/vehicles', authMiddleware, async (req, res) => {
   try {
-    const auth = req.headers.authorization;
-    if (!auth) {
-      return res.status(401).json({ success: false, error: 'Token não fornecido' });
-    }
-    
-    const jwt = require('jsonwebtoken');
-    const token = auth.replace('Bearer ', '');
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
-    const Vehicle = require('./modules/vehicles/vehicle.model');
     const count = await Vehicle.countDocuments({ tipo: req.body.tipo });
     const year = new Date().getFullYear();
     const prefix = req.body.tipo === 'moto' ? 'MOTO' : 'CARRO';
@@ -183,9 +198,7 @@ app.post('/api/vehicles', async (req, res) => {
     const vehicle = new Vehicle({
       ...req.body,
       codigo,
-      cadastradoPor: decoded.id,
-      'pipeline.status': 'disponivel',
-      'pipeline.dataEntrada': new Date()
+      cadastradoPor: req.user.id
     });
     
     await vehicle.save();
@@ -196,21 +209,30 @@ app.post('/api/vehicles', async (req, res) => {
   }
 });
 
-// Lead routes
-app.get('/api/leads', async (req, res) => {
+app.patch('/api/vehicles/:id/status', authMiddleware, async (req, res) => {
   try {
-    const auth = req.headers.authorization;
-    if (!auth) {
-      return res.status(401).json({ success: false, error: 'Token não fornecido' });
+    const { status } = req.body;
+    const vehicle = await Vehicle.findOneAndUpdate(
+      { _id: req.params.id, cadastradoPor: req.user.id },
+      { 'pipeline.status': status },
+      { new: true }
+    );
+    
+    if (!vehicle) {
+      return res.status(404).json({ success: false, error: 'Veículo não encontrado' });
     }
     
-    const jwt = require('jsonwebtoken');
-    const token = auth.replace('Bearer ', '');
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
-    const Lead = require('./modules/leads/lead.model');
-    const leads = await Lead.find({ criadoPor: decoded.id }).sort({ createdAt: -1 });
-    
+    res.json({ success: true, data: vehicle });
+  } catch (error) {
+    logger.error('Update status error:', error);
+    res.status(500).json({ success: false, error: 'Erro ao atualizar status' });
+  }
+});
+
+// ── Lead Routes ──────────────────────────────────────────────
+app.get('/api/leads', authMiddleware, async (req, res) => {
+  try {
+    const leads = await Lead.find({ criadoPor: req.user.id }).sort({ createdAt: -1 });
     res.json({ success: true, data: leads });
   } catch (error) {
     logger.error('List leads error:', error);
@@ -218,24 +240,12 @@ app.get('/api/leads', async (req, res) => {
   }
 });
 
-app.post('/api/leads', async (req, res) => {
+app.post('/api/leads', authMiddleware, async (req, res) => {
   try {
-    const auth = req.headers.authorization;
-    if (!auth) {
-      return res.status(401).json({ success: false, error: 'Token não fornecido' });
-    }
-    
-    const jwt = require('jsonwebtoken');
-    const token = auth.replace('Bearer ', '');
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
-    const Lead = require('./modules/leads/lead.model');
     const lead = new Lead({
       ...req.body,
-      criadoPor: decoded.id,
-      status: 'novo'
+      criadoPor: req.user.id
     });
-    
     await lead.save();
     res.status(201).json({ success: true, data: lead });
   } catch (error) {
