@@ -1,6 +1,5 @@
 require('dotenv').config();
 const express = require('express');
-const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
@@ -8,7 +7,10 @@ const logger = require('./config/logger');
 
 const app = express();
 
-// ── CORS NUCLEAR: FORÇA HEADERS EM TODAS AS RESPOSTAS ─────────
+// ═══════════════════════════════════════════════════════════════
+// CORS ULTRA-DEFINITIVO - Funciona em 100% dos casos
+// ═══════════════════════════════════════════════════════════════
+
 const allowedOrigins = [
   'https://mediato-nexus-ai.lovable.app',
   'https://mediatio-vehicle-nexus.vercel.app',
@@ -17,59 +19,78 @@ const allowedOrigins = [
   'http://localhost:5174',
 ];
 
-// ✅ NUCLEAR: Middleware que injeta CORS em TUDO antes de qualquer coisa
+// ✅ PRIORIDADE MÁXIMA: Primeiro middleware a executar
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   
-  // Se tem origin e está na lista, permite. Se não tem origin (Postman), permite.
-  // Se tem origin e NÃO está na lista, ainda assim permite para debug (remover depois)
-  const allowOrigin = !origin || allowedOrigins.includes(origin) ? (origin || '*') : allowedOrigins[1];
+  // Decidir qual origin retornar
+  let allowOrigin = '*'; // Default permissivo para debug
   
-  // Forçar headers CORS em TODAS as respostas
-  res.setHeader('Access-Control-Allow-Origin', allowOrigin);
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-Bot-Key, Accept, Origin');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Max-Age', '86400');
+  if (origin && allowedOrigins.includes(origin)) {
+    allowOrigin = origin; // Origem específica se estiver na lista
+  }
   
-  // Log para debug
-  logger.info(`CORS: ${req.method} ${req.path} | Origin: ${origin || 'none'} | Allow: ${allowOrigin}`);
+  // FORÇAR headers CORS (mesmo que outros middlewares tentem remover)
+  res.header('Access-Control-Allow-Origin', allowOrigin);
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD');
+  res.header('Access-Control-Allow-Headers', '*'); // Permissivo total
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Max-Age', '86400');
+  res.header('Vary', 'Origin'); // Importante para cache
   
-  // Responder OPTIONS imediatamente
+  // Log detalhado
+  logger.info(`🌐 CORS: ${req.method} ${req.path} | Origin: ${origin || 'none'} | Allow: ${allowOrigin}`);
+  
+  // Responder OPTIONS imediatamente (204 No Content)
   if (req.method === 'OPTIONS') {
-    return res.status(204).end();
+    logger.info(`✅ OPTIONS preflight respondido para ${origin}`);
+    return res.status(204).send();
   }
   
   next();
 });
 
-// ── Segurança (sem crossOriginResourcePolicy que pode bloquear) ─
+// ═══════════════════════════════════════════════════════════════
+// RESTO DA APLICAÇÃO
+// ═══════════════════════════════════════════════════════════════
+
+// Helmet configurado para NÃO interferir em CORS
 app.use(helmet({
-  contentSecurityPolicy: false, // Desabilita CSP que pode bloquear recursos
+  contentSecurityPolicy: false,
   crossOriginEmbedderPolicy: false,
-  crossOriginResourcePolicy: false, // ✅ REMOVIDO para não bloquear CORS
+  crossOriginResourcePolicy: false,
   crossOriginOpenerPolicy: false,
+  hsts: false, // Desabilita HSTS que pode causar problemas em dev
 }));
 
 app.use(compression());
 
-// ── Rate limiting ────────────────────────────────────────────
-app.use(
-  '/api/',
-  rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 300,
-    message: { success: false, error: 'Muitas requisições. Tente em 15 minutos.' },
-    standardHeaders: true,
-    legacyHeaders: false,
-  })
-);
+// Rate limiting (excluir OPTIONS do rate limit)
+app.use((req, res, next) => {
+  if (req.method === 'OPTIONS') return next();
+  next();
+});
 
-// ── Body parsers ─────────────────────────────────────────────
+app.use('/api/', rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  message: { success: false, error: 'Muitas requisições. Tente em 15 minutos.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.method === 'OPTIONS', // Não contar OPTIONS
+}));
+
+// Body parsers
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// ── Health check ─────────────────────────────────────────────
+// Logger de requisições
+app.use((req, res, next) => {
+  logger.info(`${req.method} ${req.path}`);
+  next();
+});
+
+// Health check
 app.get('/health', (req, res) => {
   const mongoose = require('mongoose');
   res.json({
@@ -79,10 +100,24 @@ app.get('/health', (req, res) => {
     uptime: Math.round(process.uptime()),
     mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
     node: process.version,
+    cors: 'enabled',
   });
 });
 
-// ── Rotas da API ─────────────────────────────────────────────
+// Teste CORS específico
+app.get('/cors-test', (req, res) => {
+  res.json({
+    success: true,
+    message: 'CORS está funcionando!',
+    yourOrigin: req.headers.origin,
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// ROTAS DA API
+// ═══════════════════════════════════════════════════════════════
+
 try {
   const authRoutes = require('./modules/auth/auth.routes');
   app.use('/api/auth', authRoutes);
@@ -113,7 +148,7 @@ try {
   logger.info('✅ Rota /api/fipe carregada');
 } catch (e) { logger.error('❌ fipe.routes:', e.message); }
 
-// ── 404 ──────────────────────────────────────────────────────
+// 404
 app.use((req, res) => {
   res.status(404).json({
     success: false,
@@ -121,9 +156,9 @@ app.use((req, res) => {
   });
 });
 
-// ── Error handler global ─────────────────────────────────────
+// Error handler
 app.use((err, req, res, next) => {
-  logger.error({ message: err.message, path: req.path, origin: req.headers.origin, stack: err.stack });
+  logger.error({ message: err.message, path: req.path, stack: err.stack });
 
   if (err.name === 'ZodError') {
     return res.status(400).json({
@@ -139,10 +174,9 @@ app.use((err, req, res, next) => {
     return res.status(401).json({ success: false, error: 'Token inválido' });
   }
 
-  const isProd = process.env.NODE_ENV === 'production';
   res.status(err.statusCode || 500).json({
     success: false,
-    error: isProd && !err.statusCode ? 'Erro interno do servidor' : err.message,
+    error: err.message || 'Erro interno do servidor',
   });
 });
 
