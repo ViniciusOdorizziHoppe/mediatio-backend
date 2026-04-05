@@ -29,6 +29,15 @@ app.use((req, res, next) => {
   if (origin && allowedOrigins.includes(origin)) {
     allowOrigin = origin; // Origem específica se estiver na lista
   }
+  // Adicione temporariamente no app.js para teste
+app.get('/api/test-cors', (req, res) => {
+  res.json({ 
+    success: true, 
+    message: 'Se você está vendo isso, CORS GET funciona!',
+    origin: req.headers.origin,
+    timestamp: Date.now()
+  });
+});
   
   // FORÇAR headers CORS (mesmo que outros middlewares tentem remover)
   res.header('Access-Control-Allow-Origin', allowOrigin);
