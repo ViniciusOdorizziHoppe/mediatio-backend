@@ -8,7 +8,7 @@ const logger = require('./config/logger');
 
 const app = express();
 
-// ── CORS CONFIGURAÇÃO DEFINITIVA ─────────────────────────────
+// ── CORS NUCLEAR: FORÇA HEADERS EM TODAS AS RESPOSTAS ─────────
 const allowedOrigins = [
   'https://mediato-nexus-ai.lovable.app',
   'https://mediatio-vehicle-nexus.vercel.app',
@@ -17,41 +17,38 @@ const allowedOrigins = [
   'http://localhost:5174',
 ];
 
-// ✅ SOLUÇÃO: CORS com callback verificando origem dinamicamente
-const corsOptions = {
-  origin: function (origin, callback) {
-    // Permitir requisições sem origin (Postman, N8N, curl, mobile apps)
-    if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      logger.warn(`CORS bloqueado: ${origin}`);
-      callback(new Error('Origem não permitida pelo CORS'));
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Bot-Key', 'Accept'],
-  preflightContinue: false,
-  optionsSuccessStatus: 204
-};
-
-// ✅ Aplicar CORS em TODAS as rotas INCLUINDO preflight
-app.use(cors(corsOptions));
-
-// ✅ Handler específico para OPTIONS (garante resposta 204)
+// ✅ NUCLEAR: Middleware que injeta CORS em TUDO antes de qualquer coisa
 app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  
+  // Se tem origin e está na lista, permite. Se não tem origin (Postman), permite.
+  // Se tem origin e NÃO está na lista, ainda assim permite para debug (remover depois)
+  const allowOrigin = !origin || allowedOrigins.includes(origin) ? (origin || '*') : allowedOrigins[1];
+  
+  // Forçar headers CORS em TODAS as respostas
+  res.setHeader('Access-Control-Allow-Origin', allowOrigin);
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-Bot-Key, Accept, Origin');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  
+  // Log para debug
+  logger.info(`CORS: ${req.method} ${req.path} | Origin: ${origin || 'none'} | Allow: ${allowOrigin}`);
+  
+  // Responder OPTIONS imediatamente
   if (req.method === 'OPTIONS') {
-    res.sendStatus(204);
-  } else {
-    next();
+    return res.status(204).end();
   }
+  
+  next();
 });
 
-// ── Segurança e performance ──────────────────────────────────
-app.use(helmet({ 
-  crossOriginResourcePolicy: { policy: 'cross-origin' }
+// ── Segurança (sem crossOriginResourcePolicy que pode bloquear) ─
+app.use(helmet({
+  contentSecurityPolicy: false, // Desabilita CSP que pode bloquear recursos
+  crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: false, // ✅ REMOVIDO para não bloquear CORS
+  crossOriginOpenerPolicy: false,
 }));
 
 app.use(compression());
@@ -71,12 +68,6 @@ app.use(
 // ── Body parsers ─────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// ── Request logger ───────────────────────────────────────────
-app.use((req, res, next) => {
-  logger.info(`${req.method} ${req.path} - Origin: ${req.headers.origin || 'none'}`);
-  next();
-});
 
 // ── Health check ─────────────────────────────────────────────
 app.get('/health', (req, res) => {
@@ -146,9 +137,6 @@ app.use((err, req, res, next) => {
   }
   if (err.name === 'JsonWebTokenError') {
     return res.status(401).json({ success: false, error: 'Token inválido' });
-  }
-  if (err.message?.includes('Origem não permitida')) {
-    return res.status(403).json({ success: false, error: err.message });
   }
 
   const isProd = process.env.NODE_ENV === 'production';
