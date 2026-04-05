@@ -8,7 +8,7 @@ const logger = require('./config/logger');
 
 const app = express();
 
-// ── CORS GLOBAL (CORREÇÃO DEFINITIVA) ─────────────────────────
+// ── CORS CONFIGURAÇÃO DEFINITIVA ─────────────────────────────
 const allowedOrigins = [
   'https://mediato-nexus-ai.lovable.app',
   'https://mediatio-vehicle-nexus.vercel.app',
@@ -17,30 +17,41 @@ const allowedOrigins = [
   'http://localhost:5174',
 ];
 
-// ✅ CORREÇÃO: Middleware CORS manual que garante preflight
+// ✅ SOLUÇÃO: CORS com callback verificando origem dinamicamente
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Permitir requisições sem origin (Postman, N8N, curl, mobile apps)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      logger.warn(`CORS bloqueado: ${origin}`);
+      callback(new Error('Origem não permitida pelo CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Bot-Key', 'Accept'],
+  preflightContinue: false,
+  optionsSuccessStatus: 204
+};
+
+// ✅ Aplicar CORS em TODAS as rotas INCLUINDO preflight
+app.use(cors(corsOptions));
+
+// ✅ Handler específico para OPTIONS (garante resposta 204)
 app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  
-  // Permitir requisições sem origin (Postman, N8N, curl)
-  if (!origin || allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin || '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-Bot-Key');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-  }
-  
-  // ✅ Responder imediatamente a requisições OPTIONS (preflight)
   if (req.method === 'OPTIONS') {
-    return res.status(204).end();
+    res.sendStatus(204);
+  } else {
+    next();
   }
-  
-  next();
 });
 
 // ── Segurança e performance ──────────────────────────────────
 app.use(helmet({ 
-  crossOriginResourcePolicy: { policy: 'cross-origin' },
-  crossOriginEmbedderPolicy: false // Permite embed de recursos cross-origin
+  crossOriginResourcePolicy: { policy: 'cross-origin' }
 }));
 
 app.use(compression());
@@ -63,7 +74,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // ── Request logger ───────────────────────────────────────────
 app.use((req, res, next) => {
-  logger.info(`${req.method} ${req.path}`);
+  logger.info(`${req.method} ${req.path} - Origin: ${req.headers.origin || 'none'}`);
   next();
 });
 
@@ -121,7 +132,7 @@ app.use((req, res) => {
 
 // ── Error handler global ─────────────────────────────────────
 app.use((err, req, res, next) => {
-  logger.error({ message: err.message, path: req.path, stack: err.stack });
+  logger.error({ message: err.message, path: req.path, origin: req.headers.origin, stack: err.stack });
 
   if (err.name === 'ZodError') {
     return res.status(400).json({
@@ -135,6 +146,9 @@ app.use((err, req, res, next) => {
   }
   if (err.name === 'JsonWebTokenError') {
     return res.status(401).json({ success: false, error: 'Token inválido' });
+  }
+  if (err.message?.includes('Origem não permitida')) {
+    return res.status(403).json({ success: false, error: err.message });
   }
 
   const isProd = process.env.NODE_ENV === 'production';
