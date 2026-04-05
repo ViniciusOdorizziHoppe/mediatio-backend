@@ -1,74 +1,143 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const mongoose = require('mongoose');
+const helmet = require('helmet');
+const compression = require('compression');
+const rateLimit = require('express-rate-limit');
+const logger = require('./config/logger');
 
 const app = express();
 
-// CORS - Configuração mais simples possível
-app.use(cors());
-app.use(express.json());
+// ── CORS ─────────────────────────────────────────────────────
+const allowedOrigins = [
+  'https://mediato-nexus-ai.lovable.app',
+  'https://mediatio-vehicle-nexus.vercel.app',
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://localhost:5174',
+];
 
-// Health check
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Sem origin = Postman, N8N, curl — permitir sempre
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    logger.warn(`CORS bloqueou: ${origin}`);
+    callback(new Error(`Origem não permitida: ${origin}`));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Bot-Key'],
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions)); // Preflight para TODAS as rotas
+
+// ── Segurança e performance ──────────────────────────────────
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+app.use(compression());
+
+// ── Rate limiting ────────────────────────────────────────────
+app.use(
+  '/api/',
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 300,
+    message: { success: false, error: 'Muitas requisições. Tente em 15 minutos.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+  })
+);
+
+// ── Body parsers ─────────────────────────────────────────────
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// ── Request logger ───────────────────────────────────────────
+app.use((req, res, next) => {
+  logger.info(`${req.method} ${req.path}`);
+  next();
+});
+
+// ── Health check ─────────────────────────────────────────────
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  const mongoose = require('mongoose');
+  res.json({
+    success: true,
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime: Math.round(process.uptime()),
+    mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+    node: process.version,
+  });
 });
 
-// Modelos
-const UserSchema = new mongoose.Schema({
-  name: String,
-  email: { type: String, unique: true },
-  password: String,
-  createdAt: { type: Date, default: Date.now }
-});
-const User = mongoose.models.User || mongoose.model('User', UserSchema);
+// ── Rotas da API ─────────────────────────────────────────────
+// Carregamento seguro com try/catch por módulo
+try {
+  const authRoutes = require('./modules/auth/auth.routes');
+  app.use('/api/auth', authRoutes);
+  logger.info('✅ Rota /api/auth carregada');
+} catch (e) { logger.error('❌ auth.routes:', e.message); }
 
-// ─── ROTAS DE AUTH ──────────────────────────────────────────
-app.post('/api/auth/register', async (req, res) => {
-  try {
-    const { name, email, password } = req.body;
-    
-    if (!name || !email || !password) {
-      return res.status(400).json({ success: false, error: 'Dados incompletos' });
-    }
-    
-    const existing = await User.findOne({ email });
-    if (existing) {
-      return res.status(409).json({ success: false, error: 'Email já existe' });
-    }
-    
-    const hash = await bcrypt.hash(password, 10);
-    const user = new User({ name, email, password: hash });
-    await user.save();
-    
-    res.status(201).json({ success: true, data: { id: user._id, name, email } });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+try {
+  const vehicleRoutes = require('./modules/vehicles/vehicle.routes');
+  app.use('/api/vehicles', vehicleRoutes);
+  logger.info('✅ Rota /api/vehicles carregada');
+} catch (e) { logger.error('❌ vehicle.routes:', e.message); }
+
+try {
+  const leadRoutes = require('./modules/leads/lead.routes');
+  app.use('/api/leads', leadRoutes);
+  logger.info('✅ Rota /api/leads carregada');
+} catch (e) { logger.error('❌ lead.routes:', e.message); }
+
+try {
+  const analyticsRoutes = require('./modules/analytics/analytics.routes');
+  app.use('/api/analytics', analyticsRoutes);
+  logger.info('✅ Rota /api/analytics carregada');
+} catch (e) { logger.error('❌ analytics.routes:', e.message); }
+
+try {
+  const fipeRoutes = require('./modules/integrations/fipe/fipe.routes');
+  app.use('/api/fipe', fipeRoutes);
+  logger.info('✅ Rota /api/fipe carregada');
+} catch (e) { logger.error('❌ fipe.routes:', e.message); }
+
+// ── 404 ──────────────────────────────────────────────────────
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    error: `Rota não encontrada: ${req.method} ${req.path}`,
+  });
+});
+
+// ── Error handler global ─────────────────────────────────────
+app.use((err, req, res, next) => {
+  logger.error({ message: err.message, path: req.path, stack: err.stack });
+
+  if (err.name === 'ZodError') {
+    return res.status(400).json({
+      success: false,
+      error: 'Dados inválidos',
+      details: err.errors?.map((e) => ({ campo: e.path.join('.'), mensagem: e.message })),
+    });
   }
-});
-
-app.post('/api/auth/login', async (req, res) => {
-  try {
-    const { email, password } = req.body;
-    
-    const user = await User.findOne({ email });
-    if (!user) return res.status(401).json({ success: false, error: 'Credenciais inválidas' });
-    
-    const valid = await bcrypt.compare(password, user.password);
-    if (!valid) return res.status(401).json({ success: false, error: 'Credenciais inválidas' });
-    
-    const token = jwt.sign({ id: user._id, email: user.email }, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' });
-    
-    res.json({ success: true, data: { token, user: { id: user._id, name: user.name, email: user.email } } });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+  if (err.code === 11000) {
+    return res.status(409).json({ success: false, error: 'Registro duplicado' });
   }
-});
+  if (err.name === 'JsonWebTokenError') {
+    return res.status(401).json({ success: false, error: 'Token inválido' });
+  }
+  if (err.message?.includes('Origem não permitida')) {
+    return res.status(403).json({ success: false, error: err.message });
+  }
 
-// Rota 404
-app.use('*', (req, res) => {
-  res.status(404).json({ success: false, error: 'Rota não encontrada' });
+  const isProd = process.env.NODE_ENV === 'production';
+  res.status(err.statusCode || 500).json({
+    success: false,
+    error: isProd && !err.statusCode ? 'Erro interno do servidor' : err.message,
+  });
 });
 
 module.exports = app;
