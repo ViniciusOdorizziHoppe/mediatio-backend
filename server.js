@@ -1,14 +1,20 @@
-// server.js – FORCE REDEPLOY 2026-04-05
-require('dotenv').config();
-const app = require('./src/app');
-const connectDB = require('./src/config/database');
-const logger = require('./src/config/logger');
+const app = require('./app');
+const connectDB = require('./config/database');
+const logger = require('./config/logger');
+const env = require('./config/env');
 
-const PORT = process.env.PORT || 8000;
+const PORT = env.PORT || 3001;
 
-connectDB().then(() => {
-  app.listen(PORT, '0.0.0.0', () => {
-    logger.info(`🚀 Servidor rodando na porta ${PORT}`);
-    logger.info(`🌐 CORS ativo para: ${process.env.FRONTEND_URL || 'todas as origens'}`);
+// Conectar ao MongoDB com retry
+connectDB()
+  .then(() => {
+    app.listen(PORT, () => {
+      logger.info(`🚀 Mediatio API rodando na porta ${PORT}`);
+      logger.info(`🌍 Environment: ${env.NODE_ENV}`);
+      logger.info(`📡 Allowed Origins: ${env.ALLOWED_ORIGINS}`);
+    });
+  })
+  .catch((err) => {
+    logger.error(`❌ Falha fatal ao iniciar: ${err.message}`);
+    process.exit(1);
   });
-});

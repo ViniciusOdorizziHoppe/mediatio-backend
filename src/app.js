@@ -3,69 +3,55 @@ const express = require('express');
 const helmet = require('helmet');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
+
 const logger = require('./config/logger');
+const corsMiddleware = require('./config/cors');   // ← Seu cors.js
+const env = require('./config/env');
 
 const app = express();
 
 // ═══════════════════════════════════════════════════════════
-// CORS NUCLEAR – intercepta TUDO antes de qualquer middleware
+// MIDDLEWARES GLOBAIS (ordem crítica)
 // ═══════════════════════════════════════════════════════════
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  const allowedOrigins = [
-    'https://mediato-nexus-ai.lovable.app',
-    'https://mediatio-vehicle-nexus.vercel.app',
-    'http://localhost:5173',
-    'http://localhost:3000',
-    'http://localhost:5174',
-  ];
 
-  // Decide qual origin retornar
-  let allowOrigin = '*';
-  if (origin && allowedOrigins.includes(origin)) {
-    allowOrigin = origin;
-  }
+// 1. CORS (primeiro! cuida de OPTIONS e headers)
+app.use(corsMiddleware);
 
-  // FORÇA headers em TODA resposta
-  res.setHeader('Access-Control-Allow-Origin', allowOrigin);
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Bot-Key');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Max-Age', '86400');
-
-  // Log obrigatório para debug (será visível no Koyeb)
-  logger.info(`[CORS] ${req.method} ${req.path} | Origin: ${origin} | Allow: ${allowOrigin}`);
-
-  // Responde OPTIONS imediatamente
-  if (req.method === 'OPTIONS') {
-    logger.info(`[CORS] OPTIONS preflight atendido para ${origin}`);
-    return res.status(204).send();
-  }
-
-  next();
-});
-
-// ═══════════════════════════════════════════════════════════
-// Helmet (sem bloqueio CORS)
-// ═══════════════════════════════════════════════════════════
+// 2. Segurança
 app.use(helmet({
-  contentSecurityPolicy: false,
+  contentSecurityPolicy: false,        // desativado para API
   crossOriginEmbedderPolicy: false,
   crossOriginResourcePolicy: false,
   crossOriginOpenerPolicy: false,
 }));
 
+// 3. Compressão
 app.use(compression());
 
-// Rate limit (ignorar OPTIONS)
-app.use('/api/', rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 300,
+// 4. Rate Limit (aplicado só em /api/)
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,   // 15 minutos
+  max: 300,                   // máximo 300 requisições
   skip: (req) => req.method === 'OPTIONS',
-}));
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Muitas requisições. Tente novamente em alguns minutos.' }
+});
+app.use('/api/', apiLimiter);
 
+// 5. Parsing de body
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+// Log de requisições (útil no Koyeb)
+app.use((req, res, next) => {
+  logger.info(`${req.method} ${req.url} | Origin: ${req.headers.origin || 'no-origin'} | IP: ${req.ip}`);
+  next();
+});
+
+// ═══════════════════════════════════════════════════════════
+// ROTAS
+// ═══════════════════════════════════════════════════════════
 
 // Health check
 app.get('/health', (req, res) => {
@@ -73,13 +59,19 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
+    environment: env.NODE_ENV,
     mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
   });
 });
 
-// Rota de teste CORS
+// Teste rápido de CORS
 app.get('/cors-test', (req, res) => {
-  res.json({ success: true, message: 'CORS OK', origin: req.headers.origin });
+  res.json({ 
+    success: true, 
+    message: 'CORS está funcionando corretamente',
+    origin: req.headers.origin,
+    allowedOrigins: env.ALLOWED_ORIGINS 
+  });
 });
 
 // Rotas da API
@@ -89,20 +81,27 @@ try {
   app.use('/api/leads', require('./modules/leads/lead.routes'));
   app.use('/api/analytics', require('./modules/analytics/analytics.routes'));
   app.use('/api/fipe', require('./modules/integrations/fipe/fipe.routes'));
-  logger.info('✅ Todas as rotas carregadas');
+  // Adicione outras rotas aqui quando criar (nexus, morph, sheets, etc.)
+
+  logger.info('✅ Todas as rotas carregadas com sucesso');
 } catch (e) {
-  logger.error(`Erro ao carregar rotas: ${e.message}`);
+  logger.error(`❌ Erro ao carregar rotas: ${e.message}`);
 }
 
-// 404
+// 404 Handler
 app.use((req, res) => {
-  res.status(404).json({ error: `Rota não encontrada: ${req.method} ${req.path}` });
+  res.status(404).json({ 
+    error: `Rota não encontrada: ${req.method} ${req.path}` 
+  });
 });
 
-// Error handler
+// Error Handler Global
 app.use((err, req, res, next) => {
-  logger.error(err.stack);
-  res.status(500).json({ error: err.message });
+  logger.error(`Erro não tratado: ${err.message}\n${err.stack}`);
+  res.status(500).json({ 
+    error: 'Erro interno do servidor',
+    message: env.NODE_ENV === 'development' ? err.message : undefined
+  });
 });
 
 module.exports = app;

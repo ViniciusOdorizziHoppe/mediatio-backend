@@ -2,10 +2,23 @@ const { z } = require('zod');
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-  PORT: z.string().default('8000'),
+  PORT: z.string().default('3001'),
   MONGODB_URI: z.string().min(1, 'MongoDB URI é obrigatória'),
   JWT_SECRET: z.string().min(32, 'JWT_SECRET deve ter pelo menos 32 caracteres'),
-  FRONTEND_URL: z.string().optional(),
+  JWT_REFRESH_SECRET: z.string().min(32),
+  
+  // === CORS ===
+  ALLOWED_ORIGINS: z.string().default(
+    'https://mediatio-vehicle-nexus.vercel.app,https://mediatio-nexus-ai.lovable.app'
+  ),
+  
+  // Outras variáveis existentes...
+  CLOUDINARY_CLOUD_NAME: z.string(),
+  CLOUDINARY_API_KEY: z.string(),
+  CLOUDINARY_API_SECRET: z.string(),
+  DIFY_API_KEY: z.string().optional(),
+  MORPH_API_URL: z.string().url().optional(),
+  GOOGLE_SHEET_ID: z.string().optional(),
 });
 
 const env = envSchema.parse(process.env);
