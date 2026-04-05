@@ -8,7 +8,7 @@ const logger = require('./config/logger');
 
 const app = express();
 
-// ── CORS ─────────────────────────────────────────────────────
+// ── CORS GLOBAL (CORREÇÃO DEFINITIVA) ─────────────────────────
 const allowedOrigins = [
   'https://mediato-nexus-ai.lovable.app',
   'https://mediatio-vehicle-nexus.vercel.app',
@@ -17,25 +17,32 @@ const allowedOrigins = [
   'http://localhost:5174',
 ];
 
-const corsOptions = {
-  origin: (origin, callback) => {
-    // Sem origin = Postman, N8N, curl — permitir sempre
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
-    logger.warn(`CORS bloqueou: ${origin}`);
-    callback(new Error(`Origem não permitida: ${origin}`));
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Bot-Key'],
-};
-
-app.use(cors(corsOptions));
-// ✅ CORREÇÃO EXPRESS 5: /*splat em vez de *
-app.options('/*splat', cors(corsOptions));
+// ✅ CORREÇÃO: Middleware CORS manual que garante preflight
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  
+  // Permitir requisições sem origin (Postman, N8N, curl)
+  if (!origin || allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin || '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-Bot-Key');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+  
+  // ✅ Responder imediatamente a requisições OPTIONS (preflight)
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+  
+  next();
+});
 
 // ── Segurança e performance ──────────────────────────────────
-app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+app.use(helmet({ 
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  crossOriginEmbedderPolicy: false // Permite embed de recursos cross-origin
+}));
+
 app.use(compression());
 
 // ── Rate limiting ────────────────────────────────────────────
@@ -105,8 +112,7 @@ try {
 } catch (e) { logger.error('❌ fipe.routes:', e.message); }
 
 // ── 404 ──────────────────────────────────────────────────────
-// ✅ CORREÇÃO EXPRESS 5: /*splat em vez de handler genérico
-app.use('/*splat', (req, res) => {
+app.use((req, res) => {
   res.status(404).json({
     success: false,
     error: `Rota não encontrada: ${req.method} ${req.path}`,
@@ -129,9 +135,6 @@ app.use((err, req, res, next) => {
   }
   if (err.name === 'JsonWebTokenError') {
     return res.status(401).json({ success: false, error: 'Token inválido' });
-  }
-  if (err.message?.includes('Origem não permitida')) {
-    return res.status(403).json({ success: false, error: err.message });
   }
 
   const isProd = process.env.NODE_ENV === 'production';
