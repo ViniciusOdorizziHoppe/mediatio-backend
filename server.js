@@ -1,7 +1,14 @@
 require('dotenv').config();
 const mongoose = require('mongoose');
 const app = require('./src/app');
+// No início do server.js, antes de tudo
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+});
 
+process.on('unhandledRejection', (err) => {
+  console.error('Unhandled Rejection:', err);
+});
 const PORT = process.env.PORT || 8000;
 
 // Conectar ao MongoDB
