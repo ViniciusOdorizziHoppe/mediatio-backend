@@ -31,7 +31,8 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions)); // Preflight para TODAS as rotas
+// ✅ CORREÇÃO EXPRESS 5: /*splat em vez de *
+app.options('/*splat', cors(corsOptions));
 
 // ── Segurança e performance ──────────────────────────────────
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
@@ -73,7 +74,6 @@ app.get('/health', (req, res) => {
 });
 
 // ── Rotas da API ─────────────────────────────────────────────
-// Carregamento seguro com try/catch por módulo
 try {
   const authRoutes = require('./modules/auth/auth.routes');
   app.use('/api/auth', authRoutes);
@@ -105,7 +105,8 @@ try {
 } catch (e) { logger.error('❌ fipe.routes:', e.message); }
 
 // ── 404 ──────────────────────────────────────────────────────
-app.use((req, res) => {
+// ✅ CORREÇÃO EXPRESS 5: /*splat em vez de handler genérico
+app.use('/*splat', (req, res) => {
   res.status(404).json({
     success: false,
     error: `Rota não encontrada: ${req.method} ${req.path}`,
