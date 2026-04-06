@@ -1,41 +1,41 @@
-/**
- * Middleware de autenticação dual:
- * - JWT normal (Authorization: Bearer token) para o frontend
- * - X-Bot-Key para os bots N8N (sem precisar de JWT rotativo)
- *
- * Configurar no Koyeb: BOT_API_KEY=mediatio-bot-2026
- */
 const jwt = require('jsonwebtoken');
+const logger = require('../../config/logger');
 
-const auth = (req, res, next) => {
+const authMiddleware = (req, res, next) => {
   try {
-    // 1. Verificar X-Bot-Key (para N8N e bots)
-    const botKey = req.headers['x-bot-key'];
-    if (botKey) {
-      const validBotKey = process.env.BOT_API_KEY || 'mediatio-bot-2026';
-      if (botKey === validBotKey) {
-        req.user = { id: 'bot-service', email: 'bot@mediatio.com', role: 'bot' };
-        return next();
-      }
-      return res.status(401).json({ success: false, error: 'Bot key inválida' });
-    }
-
-    // 2. JWT normal (frontend)
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({ success: false, error: 'Token não fornecido' });
     }
 
-    const token = authHeader.replace('Bearer ', '');
+    const token = authHeader.split(' ')[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
     req.user = decoded;
     next();
   } catch (err) {
     if (err.name === 'TokenExpiredError') {
       return res.status(401).json({ success: false, error: 'Token expirado' });
     }
-    return res.status(401).json({ success: false, error: 'Token inválido' });
+    if (err.name === 'JsonWebTokenError') {
+      return res.status(401).json({ success: false, error: 'Token inválido' });
+    }
+    logger.error('Auth middleware erro:', err);
+    return res.status(401).json({ success: false, error: 'Não autorizado' });
   }
 };
 
-module.exports = auth;
+/**
+ * Middleware para autenticação de bots (N8N, Evolution API)
+ */
+const botAuthMiddleware = (req, res, next) => {
+  const botKey = req.headers['x-bot-key'];
+  const expectedKey = process.env.BOT_KEY || 'mediatio-bot-2026';
+
+  if (!botKey || botKey !== expectedKey) {
+    return res.status(401).json({ success: false, error: 'Chave de bot inválida' });
+  }
+  next();
+};
+
+module.exports = { authMiddleware, botAuthMiddleware };

@@ -1,150 +1,129 @@
-/**
- * Score Algorithm do Mediatio
- * Avalia veículos de 0 a 100 pontos com 10 critérios
- */
-
 class ScoreCalculator {
   constructor(vehicle) {
     this.vehicle = vehicle;
     this.breakdown = [];
     this.total = 0;
-    this.maximo = 100;
   }
 
   calcular() {
     this.breakdown = [];
     this.total = 0;
 
-    this._avaliarFotos();
-    this._avaliarDocumentacao();
-    this._avaliarPrecoFipe();
-    this._avaliarCondicoes();
-    this._avaliarTempoPipeline();
-    this._avaliarDadosCompletos();
-    this._avaliarLeads();
+    this.avaliarFotos();
+    this.avaliarDocumentacao();
+    this.avaliarPreco();
+    this.avaliarCondicoes();
+    this.avaliarTempoPipeline();
+    this.avaliarDados();
+    this.avaliarEngajamento();
 
-    const scoreFinal = Math.min(Math.round((this.total / this.maximo) * 100), 100);
+    const scoreFinal = Math.min(Math.round(this.total), 100);
 
     return {
       valor: scoreFinal,
       breakdown: this.breakdown,
-      label: this._getLabel(scoreFinal),
+      label: this.getLabel(scoreFinal),
       ultimoCalculo: new Date(),
     };
   }
 
-  _avaliarFotos() {
-    const temOriginais = (this.vehicle.fotos?.originais?.length || 0) > 0;
-    const temMelhoradas = (this.vehicle.fotos?.melhoradas?.length || 0) > 0;
-    const temPrincipal = !!this.vehicle.fotos?.principal;
+  avaliarFotos() {
+    const temFotos = (this.vehicle.fotos?.originais?.length || 0) > 0;
+    const temFotoMelhorada = (this.vehicle.fotos?.melhoradas?.length || 0) > 0;
+    const temFotoPrincipal = !!this.vehicle.fotos?.principal;
 
     let pontos = 0;
-    if (temOriginais) pontos += 10;
-    if (temMelhoradas) pontos += 20; // Foto melhorada pelo MORPH vale mais
-    if (temPrincipal) pontos += 5;
+    if (temFotos) pontos += 10;
+    if (temFotoMelhorada) pontos += 20;
+    if (temFotoPrincipal) pontos += 5;
 
-    this._add('Fotos do Veículo', pontos, 35, temOriginais,
-      temMelhoradas ? 'Foto profissional com IA ✓' :
-      temOriginais ? 'Adicione foto melhorada pelo MORPH (+20pts)' :
-      'Nenhuma foto cadastrada');
+    this.addCriterio('Fotos Profissionais', pontos, 35, temFotos);
     this.total += pontos;
   }
 
-  _avaliarDocumentacao() {
-    const doc = this.vehicle.condicoes?.documentacao;
-    const ok = doc === 'ok';
-    const pendente = doc === 'pendente';
-
-    const pontos = ok ? 15 : pendente ? 5 : 0;
-    this._add('Documentação', pontos, 15, ok,
-      ok ? 'Regularizada ✓' : pendente ? 'Pendente — verifique urgente' : 'Irregular — risco de venda');
-    this.total += pontos;
+  avaliarDocumentacao() {
+    const docOk = this.vehicle.condicoes?.documentacao === 'ok';
+    this.addCriterio('Documentação Regularizada', docOk ? 15 : 0, 15, docOk);
+    this.total += docOk ? 15 : 0;
   }
 
-  _avaliarPrecoFipe() {
+  avaliarPreco() {
     const precoVenda = this.vehicle.precos?.venda || 0;
     const precoFipe = this.vehicle.precos?.fipeReferencia || 0;
 
     if (!precoFipe) {
-      this._add('Preço vs FIPE', 0, 10, false, 'FIPE não consultada ainda');
+      this.addCriterio('Preço Competitivo (vs FIPE)', 0, 10, false, 'FIPE não consultada');
       return;
     }
 
     const diferenca = ((precoVenda - precoFipe) / precoFipe) * 100;
     let pontos = 0;
-    let obs = '';
+    let msg = '';
 
-    if (diferenca <= 0) { pontos = 10; obs = `${Math.abs(diferenca.toFixed(1))}% abaixo da FIPE — ótimo`; }
-    else if (diferenca <= 10) { pontos = 10; obs = `${diferenca.toFixed(1)}% acima da FIPE — competitivo`; }
-    else if (diferenca <= 20) { pontos = 5; obs = `${diferenca.toFixed(1)}% acima — considere reduzir`; }
-    else { pontos = 0; obs = `${diferenca.toFixed(1)}% acima — preço alto`; }
+    if (diferenca <= 0) { pontos = 10; msg = 'Abaixo da FIPE'; }
+    else if (diferenca <= 10) { pontos = 10; msg = 'Até 10% acima'; }
+    else if (diferenca <= 20) { pontos = 5; msg = '10-20% acima'; }
+    else { pontos = 0; msg = 'Acima de 20% (caro)'; }
 
-    this._add('Preço Competitivo', pontos, 10, pontos === 10, obs);
+    this.addCriterio('Preço Competitivo', pontos, 10, pontos === 10, msg);
     this.total += pontos;
   }
 
-  _avaliarCondicoes() {
-    const troca = this.vehicle.condicoes?.aceitaTroca;
-    const financiamento = this.vehicle.condicoes?.aceitaFinanciamento;
+  avaliarCondicoes() {
+    const aceitaTroca = this.vehicle.condicoes?.aceitaTroca;
+    const aceitaFinanciamento = this.vehicle.condicoes?.aceitaFinanciamento;
 
-    this._add('Aceita Troca', troca ? 8 : 0, 8, !!troca,
-      troca ? 'Amplía o público de compradores ✓' : 'Considere aceitar trocas (+8pts)');
-    this.total += troca ? 8 : 0;
+    this.addCriterio('Aceita Troca', aceitaTroca ? 8 : 0, 8, aceitaTroca);
+    this.total += aceitaTroca ? 8 : 0;
 
-    this._add('Aceita Financiamento', financiamento ? 7 : 0, 7, !!financiamento,
-      financiamento ? 'Mais opções de pagamento ✓' : 'Financiamento aumenta vendas (+7pts)');
-    this.total += financiamento ? 7 : 0;
+    this.addCriterio('Aceita Financiamento', aceitaFinanciamento ? 7 : 0, 7, aceitaFinanciamento);
+    this.total += aceitaFinanciamento ? 7 : 0;
   }
 
-  _avaliarTempoPipeline() {
+  avaliarTempoPipeline() {
     const dias = this.vehicle.pipeline?.diasNoPipeline || 0;
     let pontos = 0;
-    let obs = '';
+    let msg = '';
 
-    if (dias <= 10) { pontos = 15; obs = `${dias} dias — recém anunciado ✓`; }
-    else if (dias <= 20) { pontos = 8; obs = `${dias} dias — atenção`; }
-    else { pontos = 0; obs = `${dias} dias — muito tempo, revise o anúncio`; }
+    if (dias <= 10) { pontos = 15; msg = 'Recém anunciado'; }
+    else if (dias <= 20) { pontos = 8; msg = '10-20 dias'; }
+    else { pontos = 0; msg = '+20 dias (atenção)'; }
 
-    this._add('Tempo no Pipeline', pontos, 15, dias <= 10, obs);
+    this.addCriterio('Tempo no Pipeline', pontos, 15, pontos === 15, msg);
     this.total += pontos;
   }
 
-  _avaliarDadosCompletos() {
-    const temObs = !!(this.vehicle.anuncio?.observacoes?.length > 10);
+  avaliarDados() {
+    const temObs = (this.vehicle.anuncio?.observacoes?.length || 0) > 10;
     const temDono = !!this.vehicle.proprietario?.nome;
     const temCidade = !!this.vehicle.proprietario?.cidade;
-    const temWhatsapp = !!this.vehicle.proprietario?.whatsapp;
 
     let pontos = 0;
-    if (temObs) pontos += 3;
-    if (temDono) pontos += 2;
+    if (temObs) pontos += 5;
+    if (temDono) pontos += 3;
     if (temCidade) pontos += 2;
-    if (temWhatsapp) pontos += 3;
 
-    this._add('Dados Completos', pontos, 10, pontos >= 8,
-      pontos >= 8 ? 'Cadastro completo ✓' : 'Complete os dados do veículo');
+    this.addCriterio('Dados Completos', pontos, 10, pontos >= 8);
     this.total += pontos;
   }
 
-  _avaliarLeads() {
-    const qtdLeads = this.vehicle.leads?.length || 0;
-    const pontos = qtdLeads > 0 ? 5 : 0;
-    const bonus = qtdLeads >= 3 ? 5 : 0; // Bônus para muito interesse
+  avaliarEngajamento() {
+    const leads = this.vehicle.leads?.length || 0;
+    const temLeads = leads > 0;
 
-    this._add('Interesse de Compradores', pontos + bonus, 10, qtdLeads > 0,
-      qtdLeads > 0 ? `${qtdLeads} lead(s) registrado(s) ✓` : 'Nenhum comprador ainda');
-    this.total += pontos + bonus;
+    this.addCriterio('Interesse de Compradores', temLeads ? 10 : 0, 10, temLeads, `${leads} leads`);
+    this.total += temLeads ? 10 : 0;
   }
 
-  _add(criterio, pontos, maximo, atingido, observacao = '') {
-    this.breakdown.push({ criterio, pontos, maximo, atingido, observacao });
+  addCriterio(nome, pontos, maximo, atingido, observacao = '') {
+    this.breakdown.push({ nome, pontos, maximo, atingido, observacao });
   }
 
-  _getLabel(score) {
+  getLabel(score) {
     if (score >= 80) return 'Veículo Excelente';
     if (score >= 60) return 'Bom Potencial';
     if (score >= 40) return 'Atenção Necessária';
-    return 'Crítico — Ação Urgente';
+    return 'Crítico - Ação Urgente';
   }
 }
 

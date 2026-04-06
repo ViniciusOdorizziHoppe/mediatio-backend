@@ -2,22 +2,30 @@
  * Padronização de respostas da API
  */
 
-const success = (data, extras = {}) => ({
+const success = (data, extra = {}) => ({
   success: true,
   data,
-  ...extras,
+  ...extra,
 });
 
-const error = (message, statusCode = 500, details = null) => ({
-  success: false,
-  error: message,
-  ...(details && { details }),
-});
+const error = (message, details = null, statusCode = 400) => {
+  const response = {
+    success: false,
+    error: message,
+  };
+  if (details) response.details = details;
+  return response;
+};
 
 const paginated = (data, meta) => ({
   success: true,
   data,
-  meta,
+  meta: {
+    total: meta.total,
+    page: meta.page,
+    limit: meta.limit,
+    totalPages: Math.ceil(meta.total / meta.limit),
+  },
 });
 
 module.exports = { success, error, paginated };

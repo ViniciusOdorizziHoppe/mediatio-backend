@@ -14,7 +14,7 @@ const errorMiddleware = (err, req, res, next) => {
     return res.status(400).json({
       success: false,
       error: 'Dados inválidos',
-      details: err.errors.map((e) => ({
+      details: err.errors.map(e => ({
         campo: e.path.join('.'),
         mensagem: e.message,
       })),
@@ -23,10 +23,10 @@ const errorMiddleware = (err, req, res, next) => {
 
   // MongoDB duplicate key
   if (err.code === 11000) {
-    const field = Object.keys(err.keyValue || {})[0];
+    const field = Object.keys(err.keyValue || {})[0] || 'campo';
     return res.status(409).json({
       success: false,
-      error: `Já existe um registro com esse ${field}`,
+      error: `Registro duplicado: ${field} já existe`,
     });
   }
 
@@ -34,22 +34,22 @@ const errorMiddleware = (err, req, res, next) => {
   if (err.name === 'JsonWebTokenError') {
     return res.status(401).json({ success: false, error: 'Token inválido' });
   }
-
-  // Multer errors (upload)
-  if (err.code === 'LIMIT_FILE_SIZE') {
-    return res.status(400).json({ success: false, error: 'Arquivo muito grande. Máximo: 10MB' });
-  }
-  if (err.code === 'LIMIT_UNEXPECTED_FILE') {
-    return res.status(400).json({ success: false, error: 'Campo de arquivo inesperado' });
+  if (err.name === 'TokenExpiredError') {
+    return res.status(401).json({ success: false, error: 'Token expirado' });
   }
 
-  const statusCode = err.statusCode || 500;
+  // CORS error
+  if (err.message?.includes('Origem não permitida')) {
+    return res.status(403).json({ success: false, error: err.message });
+  }
+
   const isProd = process.env.NODE_ENV === 'production';
+  const statusCode = err.statusCode || err.status || 500;
 
   res.status(statusCode).json({
     success: false,
     error: isProd && statusCode === 500 ? 'Erro interno do servidor' : err.message,
-    ...(!isProd && { stack: err.stack }),
+    ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
   });
 };
 

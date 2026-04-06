@@ -1,107 +1,33 @@
 const express = require('express');
 const router = express.Router();
-const controller = require('./vehicle.controller');
-const auth = require('../../shared/middlewares/auth.middleware');
-const { validate, createVehicleSchema, updateStatusSchema } = require('./vehicle.schema');
+const vehicleController = require('./vehicle.controller');
+const { authMiddleware } = require('../../shared/middlewares/auth.middleware');
 
-// ── GET público (bots N8N podem listar sem auth) ─────────────
-// Lista veículos disponíveis — sem autenticação (dados públicos de venda)
-router.get('/publico', async (req, res) => {
-  try {
-    const Vehicle = require('./vehicle.model');
-    const veiculos = await Vehicle.find(
-      { 'pipeline.status': 'disponivel' },
-      'codigo tipo marca modelo ano cor km precos condicoes proprietario.cidade fotos.principal score.valor score.label'
-    )
-      .sort({ 'score.valor': -1 })
-      .limit(20)
-      .lean();
+// Todas as rotas de veículos exigem autenticação
+router.use(authMiddleware);
 
-    res.json({ success: true, data: veiculos });
-  } catch (err) {
-    res.status(500).json({ success: false, error: 'Erro ao listar veículos' });
-  }
-});
+// GET /api/vehicles
+router.get('/', (req, res, next) => vehicleController.list(req, res, next));
 
-// ── Todas as rotas abaixo exigem autenticação ─────────────────
-router.use(auth);
+// GET /api/vehicles/:id
+router.get('/:id', (req, res, next) => vehicleController.getById(req, res, next));
 
-// ── CRUD ──────────────────────────────────────────────────────
-router.get('/', controller.list.bind(controller));
-router.get('/:id', controller.getById.bind(controller));
+// POST /api/vehicles
+router.post('/', (req, res, next) => vehicleController.create(req, res, next));
 
-// POST com normalização de campos do bot (precoVenda → precos.venda)
-router.post('/', (req, res, next) => {
-  // Normalizar campos que o bot N8N envia em formato flat
-  const body = req.body;
+// PATCH /api/vehicles/:id
+router.patch('/:id', (req, res, next) => vehicleController.update(req, res, next));
 
-  if (body.precoVenda !== undefined && !body.precos) {
-    body.precos = {
-      venda: body.precoVenda,
-      compra: body.precoCompra,
-      minimo: body.precoMinimo,
-    };
-    delete body.precoVenda;
-    delete body.precoCompra;
-    delete body.precoMinimo;
-  }
+// PATCH /api/vehicles/:id/status
+router.patch('/:id/status', (req, res, next) => vehicleController.updateStatus(req, res, next));
 
-  // Normalizar documentacao que pode vir fora de condicoes
-  if (body.documentacao !== undefined && !body.condicoes?.documentacao) {
-    body.condicoes = body.condicoes || {};
-    body.condicoes.documentacao = body.documentacao;
-    delete body.documentacao;
-  }
+// DELETE /api/vehicles/:id
+router.delete('/:id', (req, res, next) => vehicleController.delete(req, res, next));
 
-  if (body.aceitaTroca !== undefined && body.condicoes === undefined) {
-    body.condicoes = {};
-  }
-  if (body.aceitaTroca !== undefined) {
-    body.condicoes.aceitaTroca = body.aceitaTroca;
-    delete body.aceitaTroca;
-  }
-  if (body.aceitaFinanciamento !== undefined) {
-    if (!body.condicoes) body.condicoes = {};
-    body.condicoes.aceitaFinanciamento = body.aceitaFinanciamento;
-    delete body.aceitaFinanciamento;
-  }
+// POST /api/vehicles/:id/generate-ad
+router.post('/:id/generate-ad', (req, res, next) => vehicleController.generateAd(req, res, next));
 
-  // Para bot: o user pode não ter um ID real
-  if (req.user.role === 'bot') {
-    // Pegar o primeiro usuário admin do sistema como cadastradoPor
-    const User = require('../auth/auth.model');
-    User.findOne({ role: 'admin' }).then(admin => {
-      if (admin) req.user.id = admin._id.toString();
-      next();
-    }).catch(() => next());
-  } else {
-    next();
-  }
-}, validate(createVehicleSchema), controller.create.bind(controller));
-
-router.patch('/:id', controller.update.bind(controller));
-router.patch('/:id/status', validate(updateStatusSchema), controller.updateStatus.bind(controller));
-router.delete('/:id', controller.delete.bind(controller));
-
-// ── Ações ─────────────────────────────────────────────────────
-router.post('/:id/generate-ad', controller.generateAd.bind(controller));
-router.post('/:id/recalculate-score', controller.recalculateScore.bind(controller));
-
-// ── Fotos (Cloudinary) ─────────────────────────────────────────
-// Upload seguro com try/catch para não quebrar se cloudinary não estiver configurado
-router.post('/:id/photos', (req, res, next) => {
-  try {
-    const { upload } = require('../../shared/middlewares/upload.middleware');
-    upload.single('foto')(req, res, next);
-  } catch (err) {
-    res.status(503).json({
-      success: false,
-      error: 'Upload de fotos não configurado. Adicione CLOUDINARY_API_KEY no Koyeb.',
-    });
-  }
-}, controller.uploadPhoto.bind(controller));
-
-router.delete('/:id/photos', controller.deletePhoto.bind(controller));
-router.patch('/:id/photos/principal', controller.setPrincipalPhoto.bind(controller));
+// POST /api/vehicles/:id/recalculate-score
+router.post('/:id/recalculate-score', (req, res, next) => vehicleController.recalculateScore(req, res, next));
 
 module.exports = router;

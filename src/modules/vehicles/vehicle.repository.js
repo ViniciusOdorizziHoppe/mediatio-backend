@@ -1,129 +1,60 @@
 const Vehicle = require('./vehicle.model');
-const logger = require('../../config/logger');
 
 class VehicleRepository {
-  _buildQuery(filters = {}) {
-    const query = {};
-    if (filters.status) query['pipeline.status'] = filters.status;
-    if (filters.tipo) query.tipo = filters.tipo;
-    if (filters.marca) query.marca = new RegExp(filters.marca, 'i');
-    if (filters.cadastradoPor) query.cadastradoPor = filters.cadastradoPor;
-    if (filters.minScore) query['score.valor'] = { $gte: parseInt(filters.minScore) };
-    if (filters.search) {
-      query.$or = [
-        { modelo: new RegExp(filters.search, 'i') },
-        { marca: new RegExp(filters.search, 'i') },
-        { codigo: new RegExp(filters.search, 'i') },
-        { 'proprietario.nome': new RegExp(filters.search, 'i') },
-      ];
-    }
-    return query;
-  }
-
   async findAll(filters = {}, options = {}) {
-    const { page = 1, limit = 20, sort = { 'score.valor': -1, createdAt: -1 } } = options;
-    const query = this._buildQuery(filters);
+    const { page = 1, limit = 20, sort = '-createdAt' } = options;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const query = this.buildQuery(filters);
 
     const [data, total] = await Promise.all([
       Vehicle.find(query)
-        .populate('cadastradoPor', 'name email')
         .sort(sort)
-        .limit(Number(limit))
-        .skip((Number(page) - 1) * Number(limit))
-        .lean(),
+        .skip(skip)
+        .limit(parseInt(limit))
+        .populate('cadastradoPor', 'name email'),
       Vehicle.countDocuments(query),
     ]);
 
-    return {
-      data,
-      meta: {
-        total,
-        page: Number(page),
-        pages: Math.ceil(total / Number(limit)),
-        limit: Number(limit),
-      },
-    };
+    return { data, total, page: parseInt(page), limit: parseInt(limit) };
   }
 
   async findById(id) {
     return Vehicle.findById(id)
-      .populate('cadastradoPor', 'name email phone')
-      .populate('leads')
-      .lean();
+      .populate('cadastradoPor', 'name email')
+      .populate('leads');
   }
 
-  async countDocuments(filters = {}) {
-    return Vehicle.countDocuments(this._buildQuery(filters));
+  async findByUserId(userId, filters = {}, options = {}) {
+    return this.findAll({ ...filters, cadastradoPor: userId }, options);
   }
 
   async create(data) {
-    const vehicle = new Vehicle(data);
-    await vehicle.save();
-    return vehicle.toObject();
+    return Vehicle.create(data);
   }
 
   async update(id, data) {
-    return Vehicle.findByIdAndUpdate(
-      id,
-      { ...data, updatedAt: new Date() },
-      { new: true, runValidators: true }
-    ).lean();
+    return Vehicle.findByIdAndUpdate(id, { $set: data }, { new: true, runValidators: true });
   }
 
   async updateStatus(id, status) {
-    return Vehicle.findByIdAndUpdate(
-      id,
-      { 'pipeline.status': status, updatedAt: new Date() },
-      { new: true }
-    ).lean();
+    const update = { 'pipeline.status': status };
+    if (status === 'vendido') update['pipeline.dataVenda'] = new Date();
+    return Vehicle.findByIdAndUpdate(id, { $set: update }, { new: true });
   }
 
-  async updateScore(id, score) {
-    return Vehicle.findByIdAndUpdate(
-      id,
-      { score, updatedAt: new Date() },
-      { new: true }
-    ).lean();
-  }
-
-  async addPhoto(id, photoData, tipo = 'original') {
-    const field = tipo === 'melhorada' ? 'fotos.melhoradas' : 'fotos.originais';
-    return Vehicle.findByIdAndUpdate(
-      id,
-      { $push: { [field]: photoData } },
-      { new: true }
-    ).lean();
-  }
-
-  async removePhoto(id, photoId, tipo = 'original') {
-    const field = tipo === 'melhorada' ? 'fotos.melhoradas' : 'fotos.originais';
-    return Vehicle.findByIdAndUpdate(
-      id,
-      { $pull: { [field]: { _id: photoId } } },
-      { new: true }
-    ).lean();
-  }
-
-  async setPrincipalPhoto(id, url, publicId) {
-    return Vehicle.findByIdAndUpdate(
-      id,
-      {
-        'fotos.principal': url,
-        'fotos.principalPublicId': publicId,
-        updatedAt: new Date(),
-      },
-      { new: true }
-    ).lean();
-  }
-
-  // Soft delete → arquivar
   async delete(id) {
-    return this.updateStatus(id, 'arquivado');
+    return Vehicle.findByIdAndDelete(id);
   }
 
-  async getAnalyticsByUser(userId) {
+  async countDocuments(filter = {}) {
+    return Vehicle.countDocuments(filter);
+  }
+
+  async getAnalytics(userId) {
+    const match = userId ? { cadastradoPor: userId } : {};
     return Vehicle.aggregate([
-      { $match: { cadastradoPor: userId } },
+      { $match: match },
       {
         $group: {
           _id: '$pipeline.status',
@@ -135,30 +66,20 @@ class VehicleRepository {
     ]);
   }
 
-  async getVendasUltimosMeses(userId, meses = 6) {
-    const dataInicio = new Date();
-    dataInicio.setMonth(dataInicio.getMonth() - meses);
-
-    return Vehicle.aggregate([
-      {
-        $match: {
-          cadastradoPor: userId,
-          'pipeline.status': 'vendido',
-          'pipeline.dataVenda': { $gte: dataInicio },
-        },
-      },
-      {
-        $group: {
-          _id: {
-            ano: { $year: '$pipeline.dataVenda' },
-            mes: { $month: '$pipeline.dataVenda' },
-          },
-          vendas: { $sum: 1 },
-          comissao: { $sum: '$precos.comissaoEstimada' },
-        },
-      },
-      { $sort: { '_id.ano': 1, '_id.mes': 1 } },
-    ]);
+  buildQuery(filters) {
+    const query = {};
+    if (filters.cadastradoPor) query.cadastradoPor = filters.cadastradoPor;
+    if (filters.status) query['pipeline.status'] = filters.status;
+    if (filters.tipo) query.tipo = filters.tipo;
+    if (filters.search) {
+      query.$or = [
+        { modelo: new RegExp(filters.search, 'i') },
+        { marca: new RegExp(filters.search, 'i') },
+        { codigo: new RegExp(filters.search, 'i') },
+      ];
+    }
+    if (filters.minScore) query['score.valor'] = { $gte: parseInt(filters.minScore) };
+    return query;
   }
 }
 
