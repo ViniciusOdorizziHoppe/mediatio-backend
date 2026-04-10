@@ -12,7 +12,14 @@ class VehicleController {
       if (search) filters.search = search;
       if (minScore) filters.minScore = minScore;
 
-      const result = await vehicleService.listVehicles(filters, { page, limit }, req.user.id);
+      // Se for bot, usa o BOT_USER_ID ou o primeiro admin encontrado
+      const userId = req.user?.id || process.env.BOT_USER_ID;
+      
+      if (!userId) {
+        return res.status(400).json({ success: false, error: 'userId não identificado para esta requisição' });
+      }
+
+      const result = await vehicleService.listVehicles(filters, { page, limit }, userId);
       res.json(paginated(result.data, result));
     } catch (err) {
       next(err);

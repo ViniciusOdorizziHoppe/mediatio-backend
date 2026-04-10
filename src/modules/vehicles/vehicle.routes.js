@@ -1,9 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const vehicleController = require('./vehicle.controller');
-const { authMiddleware } = require('../../shared/middlewares/auth.middleware');
+const { authMiddleware, botAuthMiddleware } = require('../../shared/middlewares/auth.middleware');
 
-// Todas as rotas de veículos exigem autenticação
+// Rota pública para bots (X-Bot-Key)
+router.get('/publico', botAuthMiddleware, (req, res, next) => vehicleController.list(req, res, next));
+
+// Todas as demais rotas de veículos exigem autenticação JWT
 router.use(authMiddleware);
 
 // GET /api/vehicles
