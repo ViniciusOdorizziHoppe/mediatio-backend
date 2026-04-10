@@ -78,8 +78,19 @@ router.get('/dashboard', async (req, res, next) => {
 router.get('/pipeline', async (req, res, next) => {
   try {
     const userId = new mongoose.Types.ObjectId(req.user.id);
+    const { period } = req.query;
+    
+    const match = { cadastradoPor: userId };
+    
+    if (period === '7' || period === '30') {
+      const days = parseInt(period);
+      const dateLimit = new Date();
+      dateLimit.setDate(dateLimit.getDate() - days);
+      match.createdAt = { $gte: dateLimit };
+    }
+
     const data = await Vehicle.aggregate([
-      { $match: { cadastradoPor: userId } },
+      { $match: match },
       {
         $group: {
           _id: '$pipeline.status',
