@@ -47,6 +47,19 @@ class LeadController {
     }
   }
 
+  async updateStatus(req, res, next) {
+    try {
+      const { status } = req.body;
+      if (!status) {
+        return res.status(400).json({ success: false, error: 'Status é obrigatório' });
+      }
+      const lead = await leadService.updateLead(req.params.id, { status }, req.user.id);
+      res.json(success(lead));
+    } catch (err) {
+      next(err);
+    }
+  }
+
   async delete(req, res, next) {
     try {
       await leadService.deleteLead(req.params.id, req.user.id);

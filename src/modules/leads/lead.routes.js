@@ -21,6 +21,9 @@ router.post('/', (req, res, next) => leadController.create(req, res, next));
 // PATCH /api/leads/:id
 router.patch('/:id', (req, res, next) => leadController.update(req, res, next));
 
+// PATCH /api/leads/:id/status
+router.patch('/:id/status', (req, res, next) => leadController.updateStatus(req, res, next));
+
 // DELETE /api/leads/:id
 router.delete('/:id', (req, res, next) => leadController.delete(req, res, next));
 
