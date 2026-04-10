@@ -23,7 +23,9 @@ class LeadRepository {
   }
 
   async findByWhatsapp(whatsapp, userId) {
-    return Lead.findOne({ whatsapp, criadoPor: userId });
+    const query = { whatsapp };
+    if (userId) query.criadoPor = userId;
+    return Lead.findOne(query);
   }
 
   async create(data) {
