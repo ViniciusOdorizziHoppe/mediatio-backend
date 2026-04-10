@@ -9,6 +9,9 @@ const errorMiddleware = require('./shared/middlewares/error.middleware');
 
 const app = express();
 
+// ── Configuração de Proxy (Necessário para Koyeb/Vercel) ───────
+app.set('trust proxy', 1);
+
 // ── CORS ──────────────────────────────────────────────────────
 // NOTA: O frontend usa proxy Vercel (/api/* → Koyeb), então as
 // requisições chegam sem Origin cross-origin. Mas mantemos CORS
