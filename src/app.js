@@ -96,6 +96,7 @@ const loadRoute = (path, mountPoint) => {
   }
 };
 
+loadRoute('./modules/health/health.routes', '/api/health');
 loadRoute('./modules/auth/auth.routes', '/api/auth');
 loadRoute('./modules/vehicles/vehicle.routes', '/api/vehicles');
 loadRoute('./modules/leads/lead.routes', '/api/leads');
