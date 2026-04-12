@@ -134,4 +134,63 @@ router.get('/comissoes', async (req, res, next) => {
   }
 });
 
+/**
+ * GET /api/analytics/bot-performance
+ * Performance da IA (leads e agendamentos)
+ */
+router.get('/bot-performance', async (req, res, next) => {
+  try {
+    const userId = new mongoose.Types.ObjectId(req.user.id);
+    const { period = '7' } = req.query;
+    const days = parseInt(period);
+    const dateLimit = new Date();
+    dateLimit.setDate(dateLimit.getDate() - days);
+
+    const [leadsData, stats] = await Promise.all([
+      Lead.aggregate([
+        { 
+          $match: { 
+            criadoPor: userId,
+            createdAt: { $gte: dateLimit }
+          } 
+        },
+        {
+          $group: {
+            _id: {
+              $dateToString: { format: "%Y-%m-%d", date: "$createdAt" }
+            },
+            leads: { $sum: 1 },
+            qualificados: { 
+              $sum: { $cond: [{ $eq: ["$status", "interessado"] }, 1, 0] } 
+            }
+          }
+        },
+        { $sort: { _id: 1 } }
+      ]),
+      Lead.aggregate([
+        { $match: { criadoPor: userId, createdAt: { $gte: dateLimit } } },
+        {
+          $group: {
+            _id: null,
+            totalLeads: { $sum: 1 },
+            qualificados: { 
+              $sum: { $cond: [{ $eq: ["$status", "interessado"] }, 1, 0] } 
+            },
+            agendamentos: { 
+              $sum: { $cond: [{ $eq: ["$status", "proposta_enviada"] }, 1, 0] } 
+            }
+          }
+        }
+      ])
+    ]);
+
+    res.json(success({
+      daily: leadsData,
+      summary: stats[0] || { totalLeads: 0, qualificados: 0, agendamentos: 0 }
+    }));
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;
