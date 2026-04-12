@@ -100,6 +100,7 @@ loadRoute('./modules/health/health.routes', '/api/health');
 loadRoute('./modules/auth/auth.routes', '/api/auth');
 loadRoute('./modules/vehicles/vehicle.routes', '/api/vehicles');
 loadRoute('./modules/leads/lead.routes', '/api/leads');
+loadRoute('./modules/appointments/appointment.routes', '/api/appointments');
 loadRoute('./modules/analytics/analytics.routes', '/api/analytics');
 loadRoute('./modules/integrations/fipe/fipe.routes', '/api/fipe');
 
