@@ -31,14 +31,33 @@ class LeadService {
    * Cria ou atualiza lead pelo WhatsApp (usado pelo bot N8N)
    */
   async upsertLeadByWhatsapp(data, userId) {
+    const LeadModel = require('./lead.model');
     const existing = await leadRepository.findByWhatsapp(data.whatsapp, userId);
+    
     if (existing) {
-      const updated = await leadRepository.update(existing._id, {
-        ...data,
-        ultimoContato: new Date(),
-      });
+      const { historicoMensagens, ...otherData } = data;
+      
+      let updated;
+      if (historicoMensagens && historicoMensagens.length > 0) {
+        // Se houver novas mensagens, faz o append no array existente
+        updated = await LeadModel.findByIdAndUpdate(
+          existing._id,
+          { 
+            $set: { ...otherData, ultimoContato: new Date() },
+            $push: { historicoMensagens: { $each: historicoMensagens } } 
+          },
+          { new: true }
+        );
+      } else {
+        updated = await leadRepository.update(existing._id, {
+          ...otherData,
+          ultimoContato: new Date(),
+        });
+      }
+      
       return { lead: updated, created: false };
     }
+
     const lead = await this.createLead(data, userId);
     return { lead, created: true };
   }

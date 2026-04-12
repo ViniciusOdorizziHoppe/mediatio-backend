@@ -18,6 +18,11 @@ const createLeadSchema = z.object({
     if (typeof val === 'string') return { descricao: val };
     return val;
   }),
+  historicoMensagens: z.array(z.object({
+    role: z.enum(['user', 'assistant', 'system']),
+    content: z.string(),
+    timestamp: z.string().optional(),
+  })).optional(),
   notas: z.string().optional(),
   userId: z.string().optional(),
 });

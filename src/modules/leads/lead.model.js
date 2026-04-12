@@ -32,6 +32,13 @@ const leadSchema = new mongoose.Schema(
     orcamento: Number,
     cidade: String,
     ultimoContato: Date,
+    historicoMensagens: [
+      {
+        role: { type: String, enum: ['user', 'assistant', 'system'], default: 'user' },
+        content: String,
+        timestamp: { type: Date, default: Date.now },
+      }
+    ],
     notas: String,
     criadoPor: {
       type: mongoose.Schema.Types.ObjectId,
