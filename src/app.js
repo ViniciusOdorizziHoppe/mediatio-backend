@@ -72,7 +72,7 @@ app.use((req, res, next) => {
 });
 
 // ── Health Check ──────────────────────────────────────────────
-app.get('/health', (req, res) => {
+const healthHandler = (req, res) => {
   const mongoose = require('mongoose');
   res.json({
     success: true,
@@ -83,7 +83,9 @@ app.get('/health', (req, res) => {
     node: process.version,
     env: process.env.NODE_ENV,
   });
-});
+};
+app.get('/health', healthHandler);
+app.get('/api/health', healthHandler);
 
 // ── Rotas da API ──────────────────────────────────────────────
 const loadRoute = (path, mountPoint) => {
@@ -96,7 +98,6 @@ const loadRoute = (path, mountPoint) => {
   }
 };
 
-loadRoute('./modules/health/health.routes', '/api/health');
 loadRoute('./modules/auth/auth.routes', '/api/auth');
 loadRoute('./modules/vehicles/vehicle.routes', '/api/vehicles');
 loadRoute('./modules/leads/lead.routes', '/api/leads');
