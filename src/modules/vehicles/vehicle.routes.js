@@ -3,8 +3,18 @@ const router = express.Router();
 const vehicleController = require('./vehicle.controller');
 const { authMiddleware, botAuthMiddleware } = require('../../shared/middlewares/auth.middleware');
 
-// Rota pública para bots (X-Bot-Key)
-router.get('/publico', botAuthMiddleware, (req, res, next) => vehicleController.list(req, res, next));
+// ✅ NOVO: Rota para bot criar veículos (vendedores)
+router.post('/bot', botAuthMiddleware, (req, res, next) => {
+  // Bot usa BOT_USER_ID como usuário
+  req.user = { id: process.env.BOT_USER_ID || 'admin' };
+  vehicleController.create(req, res, next);
+});
+
+// Rota pública para bots listar veículos (X-Bot-Key)
+router.get('/publico', botAuthMiddleware, (req, res, next) => {
+  req.user = { id: process.env.BOT_USER_ID || 'admin' };
+  vehicleController.list(req, res, next);
+});
 
 // Todas as demais rotas de veículos exigem autenticação JWT
 router.use(authMiddleware);

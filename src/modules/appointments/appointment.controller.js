@@ -6,7 +6,6 @@ class AppointmentController {
     try {
       const { status, tipo, from, to } = req.query;
       const query = { criadoPor: req.user.id };
-
       if (status) query.status = status;
       if (tipo) query.tipo = tipo;
       if (from || to) {
@@ -14,12 +13,10 @@ class AppointmentController {
         if (from) query.data.$gte = new Date(from);
         if (to) query.data.$lte = new Date(to);
       }
-
       const appointments = await Appointment.find(query)
         .populate('leadId', 'nome whatsapp')
         .populate('vehicleId', 'marca modelo ano placa')
         .sort('data');
-
       return apiResponse.success(res, appointments);
     } catch (e) {
       next(e);
@@ -28,10 +25,34 @@ class AppointmentController {
 
   async create(req, res, next) {
     try {
+      const { leadId, vehicleId, data, tipo, status, notas } = req.body;
+
+      // ✅ VALIDAÇÃO: leadId é obrigatório
+      if (!leadId) {
+        return res.status(400).json({ 
+          success: false, 
+          error: 'leadId é obrigatório' 
+        });
+      }
+
+      // ✅ VALIDAÇÃO: data é obrigatória
+      if (!data) {
+        return res.status(400).json({ 
+          success: false, 
+          error: 'data é obrigatória' 
+        });
+      }
+
       const appointment = await Appointment.create({
-        ...req.body,
+        leadId,
+        vehicleId,
+        data: new Date(data),
+        tipo: tipo || 'test_drive',
+        status: status || 'pendente',
+        notas,
         criadoPor: req.user.id,
       });
+
       return apiResponse.success(res, appointment, 201);
     } catch (e) {
       next(e);
