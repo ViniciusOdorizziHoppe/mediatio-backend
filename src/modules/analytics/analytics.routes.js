@@ -1,10 +1,71 @@
 const express = require('express');
 const router = express.Router();
-const { authMiddleware } = require('../../shared/middlewares/auth.middleware');
+const { authMiddleware, botAuthMiddleware } = require('../../shared/middlewares/auth.middleware');
 const { success } = require('../../shared/utils/api-response');
 const Vehicle = require('../vehicles/vehicle.model');
 const Lead = require('../leads/lead.model');
+const Appointment = require('../appointments/appointment.model');
 const mongoose = require('mongoose');
+
+/**
+ * GET /api/analytics/bot-metrics
+ * Métricas do dia para o admin via WhatsApp bot.
+ * Protegido pela chave do bot (X-Bot-Key). Usa BOT_USER_ID como dono padrão.
+ */
+router.get('/bot-metrics', botAuthMiddleware, async (req, res, next) => {
+  try {
+    const rawUserId = req.query.userId || process.env.BOT_USER_ID;
+    if (!rawUserId || !mongoose.Types.ObjectId.isValid(rawUserId)) {
+      return res.status(400).json({ success: false, error: 'userId inválido' });
+    }
+    const userId = new mongoose.Types.ObjectId(rawUserId);
+
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfWeek = new Date(startOfDay);
+    startOfWeek.setDate(startOfWeek.getDate() - 6);
+
+    const [leadsHoje, leadsPorStatusHoje, leadsSemana, agendamentosHoje, veiculos] = await Promise.all([
+      Lead.countDocuments({ criadoPor: userId, createdAt: { $gte: startOfDay } }),
+      Lead.aggregate([
+        { $match: { criadoPor: userId, createdAt: { $gte: startOfDay } } },
+        { $group: { _id: '$status', count: { $sum: 1 } } },
+      ]),
+      Lead.countDocuments({ criadoPor: userId, createdAt: { $gte: startOfWeek } }),
+      Appointment.countDocuments({ criadoPor: userId, data: { $gte: startOfDay, $lt: new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000) } }),
+      Vehicle.aggregate([
+        { $match: { cadastradoPor: userId } },
+        { $group: { _id: '$pipeline.status', count: { $sum: 1 } } },
+      ]),
+    ]);
+
+    const statusHoje = leadsPorStatusHoje.reduce((acc, s) => { acc[s._id] = s.count; return acc; }, {});
+    const estoquePorStatus = veiculos.reduce((acc, s) => { acc[s._id] = s.count; return acc; }, {});
+    const totalEstoque = veiculos.reduce((t, s) => t + s.count, 0);
+    const disponiveis = estoquePorStatus.disponivel || 0;
+
+    res.json(success({
+      hoje: {
+        leads: leadsHoje,
+        interessados: statusHoje.interessado || 0,
+        propostas: statusHoje.proposta_enviada || 0,
+        fechados: statusHoje.fechado || 0,
+        perdidos: statusHoje.perdido || 0,
+        agendamentos: agendamentosHoje,
+      },
+      semana: {
+        leads: leadsSemana,
+      },
+      estoque: {
+        total: totalEstoque,
+        disponiveis,
+        porStatus: estoquePorStatus,
+      },
+    }));
+  } catch (err) {
+    next(err);
+  }
+});
 
 router.use(authMiddleware);
 
