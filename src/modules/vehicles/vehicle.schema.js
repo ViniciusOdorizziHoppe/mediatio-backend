@@ -26,6 +26,17 @@ const createVehicleSchema = z.object({
   anuncio: z.object({
     observacoes: z.string().optional(),
   }).optional(),
+  fotos: z.object({
+    principal: z.string().optional(),
+    originais: z.array(z.object({
+      url: z.string(),
+      publicId: z.string().optional().default(''),
+    })).optional(),
+    melhoradas: z.array(z.object({
+      url: z.string(),
+      publicId: z.string().optional().default(''),
+    })).optional(),
+  }).optional(),
 });
 
 const updateVehicleSchema = createVehicleSchema.partial();
