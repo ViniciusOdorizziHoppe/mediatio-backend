@@ -32,19 +32,24 @@ class LeadService {
    */
   async upsertLeadByWhatsapp(data, userId) {
     const LeadModel = require('./lead.model');
-    const existing = await leadRepository.findByWhatsapp(data.whatsapp, userId);
-    
+    // Normaliza o whatsapp no write: tira qualquer sufixo "@..." — assim leads
+    // legados ficam consistentes com o formato que o bot envia hoje (só dígitos).
+    const normalizedWhatsapp = String(data.whatsapp || '').split('@')[0];
+    const payload = { ...data, whatsapp: normalizedWhatsapp };
+
+    const existing = await leadRepository.findByWhatsapp(normalizedWhatsapp, userId);
+
     if (existing) {
-      const { historicoMensagens, ...otherData } = data;
-      
+      const { historicoMensagens, ...otherData } = payload;
+
       let updated;
       if (historicoMensagens && historicoMensagens.length > 0) {
         // Se houver novas mensagens, faz o append no array existente
         updated = await LeadModel.findByIdAndUpdate(
           existing._id,
-          { 
+          {
             $set: { ...otherData, ultimoContato: new Date() },
-            $push: { historicoMensagens: { $each: historicoMensagens } } 
+            $push: { historicoMensagens: { $each: historicoMensagens } }
           },
           { new: true }
         );
@@ -54,11 +59,11 @@ class LeadService {
           ultimoContato: new Date(),
         });
       }
-      
+
       return { lead: updated, created: false };
     }
 
-    const lead = await this.createLead(data, userId);
+    const lead = await this.createLead(payload, userId);
     return { lead, created: true };
   }
 

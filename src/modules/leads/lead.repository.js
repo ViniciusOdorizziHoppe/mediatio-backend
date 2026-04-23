@@ -23,7 +23,18 @@ class LeadRepository {
   }
 
   async findByWhatsapp(whatsapp, userId) {
-    const query = { whatsapp };
+    // Leads antigos podem ter o JID cru ("554792099658@s.whatsapp.net" ou "@lid").
+    // O bot hoje normaliza antes de enviar (só dígitos + possível sufixo @lid).
+    // Buscamos por igualdade e, se não achar, por "dígitos + qualquer sufixo @"
+    // pra casar registros legados sem precisar fazer migração do banco.
+    const base = String(whatsapp || '').split('@')[0];
+    const query = {
+      $or: [
+        { whatsapp },
+        { whatsapp: base },
+        { whatsapp: { $regex: `^${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}@` } },
+      ],
+    };
     if (userId) query.criadoPor = userId;
     return Lead.findOne(query);
   }
