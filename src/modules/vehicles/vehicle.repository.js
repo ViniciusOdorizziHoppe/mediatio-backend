@@ -33,11 +33,14 @@ class VehicleRepository {
     return Vehicle.create(data);
   }
 
-  // Próximo número sequencial do código para um tipo/usuário baseado no
-  // maior código existente (não no count, pois count falha quando algum
-  // veículo é deletado → colisão com `codigo` unique).
-  async nextCodigoNumber(tipo, userId) {
-    const last = await Vehicle.findOne({ tipo, cadastradoPor: userId })
+  // Próximo número sequencial global do código para um tipo, baseado no
+  // maior código existente do ano corrente (não no count, pois count
+  // falha quando algum veículo é deletado → colisão com `codigo` unique).
+  async nextCodigoNumber(tipo) {
+    const prefix = tipo === 'moto' ? 'MOTO' : 'CARRO';
+    const year = new Date().getFullYear();
+    const pattern = new RegExp(`^${prefix}-${year}-`);
+    const last = await Vehicle.findOne({ tipo, codigo: pattern })
       .sort({ codigo: -1 })
       .select('codigo')
       .lean();
