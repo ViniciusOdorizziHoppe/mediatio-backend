@@ -33,6 +33,19 @@ class VehicleRepository {
     return Vehicle.create(data);
   }
 
+  // Próximo número sequencial do código para um tipo/usuário baseado no
+  // maior código existente (não no count, pois count falha quando algum
+  // veículo é deletado → colisão com `codigo` unique).
+  async nextCodigoNumber(tipo, userId) {
+    const last = await Vehicle.findOne({ tipo, cadastradoPor: userId })
+      .sort({ codigo: -1 })
+      .select('codigo')
+      .lean();
+    if (!last || !last.codigo) return 1;
+    const match = String(last.codigo).match(/-(\d+)$/);
+    return match ? parseInt(match[1], 10) + 1 : 1;
+  }
+
   async update(id, data) {
     return Vehicle.findByIdAndUpdate(id, { $set: data }, { new: true, runValidators: true });
   }

@@ -31,11 +31,11 @@ class VehicleService {
 
   async createVehicle(data, userId) {
     try {
-      // Gera código automático: MOTO-2025-0001 ou CARRO-2025-0001
-      const count = await vehicleRepository.countDocuments({ tipo: data.tipo, cadastradoPor: userId });
+      // Gera código automático: MOTO-2025-0001 ou CARRO-2025-0001.
+      // Usa o maior código existente (não count) para tolerar deleções e
+      // tenta até 5 vezes caso outro request cadastre no meio (E11000).
       const year = new Date().getFullYear();
       const prefix = data.tipo === 'moto' ? 'MOTO' : 'CARRO';
-      const codigo = `${prefix}-${year}-${String(count + 1).padStart(4, '0')}`;
 
       // Tenta buscar FIPE automaticamente
       let fipeData = {};
@@ -48,9 +48,8 @@ class VehicleService {
         }
       }
 
-      const vehicleData = {
+      const baseData = {
         ...data,
-        codigo,
         cadastradoPor: userId,
         precos: {
           ...data.precos,
@@ -59,13 +58,29 @@ class VehicleService {
         },
       };
 
-      // Calcula score inicial
-      const calculator = new ScoreCalculator(vehicleData);
-      vehicleData.score = calculator.calcular();
+      // Score inicial
+      const calculator = new ScoreCalculator(baseData);
+      baseData.score = calculator.calcular();
 
-      const vehicle = await vehicleRepository.create(vehicleData);
-      logger.info(`Veículo criado: ${vehicle.codigo} por ${userId}`);
-      return vehicle;
+      let next = await vehicleRepository.nextCodigoNumber(data.tipo, userId);
+      let lastError;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const codigo = `${prefix}-${year}-${String(next).padStart(4, '0')}`;
+        try {
+          const vehicle = await vehicleRepository.create({ ...baseData, codigo });
+          logger.info(`Veículo criado: ${vehicle.codigo} por ${userId}`);
+          return vehicle;
+        } catch (err) {
+          // Erro de duplicate key (índice único de `codigo`) → tenta o próximo número.
+          if (err && err.code === 11000) {
+            lastError = err;
+            next += 1;
+            continue;
+          }
+          throw err;
+        }
+      }
+      throw lastError || new Error('Não foi possível gerar código único');
     } catch (error) {
       logger.error('Erro ao criar veículo:', error);
       throw error;
