@@ -1,6 +1,7 @@
 const leadService = require('./lead.service');
 const { createLeadSchema, updateLeadSchema } = require('./lead.schema');
 const { success, paginated } = require('../../shared/utils/api-response');
+const { resolveBotUserId } = require('../../shared/utils/bot-user');
 
 class LeadController {
   async list(req, res, next) {
@@ -69,15 +70,11 @@ class LeadController {
     }
   }
 
-  // Endpoint para bot N8N (usa X-Bot-Key ao invés de JWT)
+  // Endpoint para bot (usa X-Bot-Key ao invés de JWT)
   async botCreate(req, res, next) {
     try {
       const data = createLeadSchema.parse(req.body);
-      // Bot usa um userId padrão (admin) — ajuste conforme necessário
-      const adminUserId = process.env.BOT_USER_ID || req.body.userId;
-      if (!adminUserId) {
-        return res.status(400).json({ success: false, error: 'userId é obrigatório para bot' });
-      }
+      const adminUserId = await resolveBotUserId();
       const result = await leadService.upsertLeadByWhatsapp(data, adminUserId);
       res.status(result.created ? 201 : 200).json(success(result.lead));
     } catch (err) {

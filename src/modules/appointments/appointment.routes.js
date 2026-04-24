@@ -2,12 +2,17 @@ const express = require('express');
 const router = express.Router();
 const appointmentController = require('./appointment.controller');
 const { authMiddleware, botAuthMiddleware } = require('../../shared/middlewares/auth.middleware');
+const { resolveBotUserId } = require('../../shared/utils/bot-user');
 
-// ✅ NOVO: Rota para bot criar agendamentos (sem JWT)
-router.post('/bot', botAuthMiddleware, (req, res, next) => {
-  // Bot usa BOT_USER_ID como usuário
-  req.user = { id: process.env.BOT_USER_ID || 'admin' };
-  appointmentController.create(req, res, next);
+// Rota para bot criar agendamentos (sem JWT)
+router.post('/bot', botAuthMiddleware, async (req, res, next) => {
+  try {
+    const userId = await resolveBotUserId();
+    req.user = { id: userId };
+    appointmentController.create(req, res, next);
+  } catch (err) {
+    next(err);
+  }
 });
 
 // Rotas normais exigem JWT
