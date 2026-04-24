@@ -62,7 +62,7 @@ class VehicleService {
       const calculator = new ScoreCalculator(baseData);
       baseData.score = calculator.calcular();
 
-      let next = await vehicleRepository.nextCodigoNumber(data.tipo, userId);
+      let next = await vehicleRepository.nextCodigoNumber(data.tipo);
       let lastError;
       for (let attempt = 0; attempt < 5; attempt++) {
         const codigo = `${prefix}-${year}-${String(next).padStart(4, '0')}`;
