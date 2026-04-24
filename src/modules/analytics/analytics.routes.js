@@ -22,17 +22,49 @@ router.get('/bot-metrics', botAuthMiddleware, async (req, res, next) => {
 
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
     const startOfWeek = new Date(startOfDay);
     startOfWeek.setDate(startOfWeek.getDate() - 6);
 
-    const [leadsHoje, leadsPorStatusHoje, leadsSemana, agendamentosHoje, veiculos] = await Promise.all([
+    const [
+      leadsHoje,
+      leadsPorStatusHoje,
+      atendidosHoje,
+      veiculosMencionadosHoje,
+      leadsSemana,
+      agendamentosHoje,
+      veiculos,
+    ] = await Promise.all([
+      // leads criados hoje
       Lead.countDocuments({ criadoPor: userId, createdAt: { $gte: startOfDay } }),
       Lead.aggregate([
         { $match: { criadoPor: userId, createdAt: { $gte: startOfDay } } },
         { $group: { _id: '$status', count: { $sum: 1 } } },
       ]),
+      // pessoas atendidas hoje = leads que tiveram atividade hoje (criados OU atualizados)
+      Lead.countDocuments({
+        criadoPor: userId,
+        $or: [
+          { createdAt: { $gte: startOfDay, $lt: endOfDay } },
+          { updatedAt: { $gte: startOfDay, $lt: endOfDay } },
+        ],
+      }),
+      // veículos mencionados hoje (pelo campo interesse.descricao dos leads)
+      Lead.aggregate([
+        {
+          $match: {
+            criadoPor: userId,
+            updatedAt: { $gte: startOfDay, $lt: endOfDay },
+            'interesse.descricao': { $exists: true, $ne: '' },
+          },
+        },
+        { $group: { _id: '$interesse.descricao', count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: 10 },
+        { $project: { _id: 0, nome: '$_id', count: 1 } },
+      ]),
       Lead.countDocuments({ criadoPor: userId, createdAt: { $gte: startOfWeek } }),
-      Appointment.countDocuments({ criadoPor: userId, data: { $gte: startOfDay, $lt: new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000) } }),
+      Appointment.countDocuments({ criadoPor: userId, data: { $gte: startOfDay, $lt: endOfDay } }),
       Vehicle.aggregate([
         { $match: { cadastradoPor: userId } },
         { $group: { _id: '$pipeline.status', count: { $sum: 1 } } },
@@ -44,14 +76,21 @@ router.get('/bot-metrics', botAuthMiddleware, async (req, res, next) => {
     const totalEstoque = veiculos.reduce((t, s) => t + s.count, 0);
     const disponiveis = estoquePorStatus.disponivel || 0;
 
+    const percentualConversao = atendidosHoje > 0
+      ? Number(((agendamentosHoje / atendidosHoje) * 100).toFixed(1))
+      : 0;
+
     res.json(success({
       hoje: {
+        atendidos: atendidosHoje,
         leads: leadsHoje,
         interessados: statusHoje.interessado || 0,
         propostas: statusHoje.proposta_enviada || 0,
         fechados: statusHoje.fechado || 0,
         perdidos: statusHoje.perdido || 0,
         agendamentos: agendamentosHoje,
+        percentualConversao,
+        veiculosMencionados: veiculosMencionadosHoje,
       },
       semana: {
         leads: leadsSemana,

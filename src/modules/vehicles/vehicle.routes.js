@@ -10,6 +10,13 @@ router.post('/bot', botAuthMiddleware, (req, res, next) => {
   vehicleController.create(req, res, next);
 });
 
+// ✅ NOVO: Rota para o bot mover veículo no pipeline (Kanban do frontend)
+// durante as conversas com leads. Autenticada via X-Bot-Key, nao exige JWT
+// e nao faz check de ownership (bot opera em nome do BOT_USER_ID).
+router.patch('/:id/pipeline-bot', botAuthMiddleware, (req, res, next) => {
+  vehicleController.updateStatusAsBot(req, res, next);
+});
+
 // Rota pública para bots listar veículos (X-Bot-Key)
 router.get('/publico', botAuthMiddleware, (req, res, next) => {
   req.user = { id: process.env.BOT_USER_ID || 'admin' };

@@ -65,6 +65,16 @@ class VehicleController {
     }
   }
 
+  async updateStatusAsBot(req, res, next) {
+    try {
+      const { status } = updateStatusSchema.parse(req.body);
+      const vehicle = await vehicleService.updateStatusAsBot(req.params.id, status);
+      res.json(success(vehicle));
+    } catch (err) {
+      next(err);
+    }
+  }
+
   async delete(req, res, next) {
     try {
       await vehicleService.deleteVehicle(req.params.id, req.user.id);

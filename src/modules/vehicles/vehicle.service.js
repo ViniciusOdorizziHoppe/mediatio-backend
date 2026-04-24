@@ -95,6 +95,19 @@ class VehicleService {
     return vehicleRepository.updateStatus(id, status);
   }
 
+  // Usado pelo bot (X-Bot-Key) — bypass do check de ownership porque
+  // o bot já é autenticado pela chave e opera em nome do BOT_USER_ID.
+  async updateStatusAsBot(id, status) {
+    const vehicle = await vehicleRepository.findById(id);
+    if (!vehicle) {
+      const err = new Error('Veículo não encontrado');
+      err.statusCode = 404;
+      throw err;
+    }
+    logger.info(`[bot] Status alterado: ${id} → ${status}`);
+    return vehicleRepository.updateStatus(id, status);
+  }
+
   async deleteVehicle(id, userId) {
     await this.getVehicleById(id, userId);
     return vehicleRepository.delete(id);
