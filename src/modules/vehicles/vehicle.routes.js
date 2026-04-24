@@ -2,12 +2,17 @@ const express = require('express');
 const router = express.Router();
 const vehicleController = require('./vehicle.controller');
 const { authMiddleware, botAuthMiddleware } = require('../../shared/middlewares/auth.middleware');
+const { resolveBotUserId } = require('../../shared/utils/bot-user');
 
-// ✅ NOVO: Rota para bot criar veículos (vendedores)
-router.post('/bot', botAuthMiddleware, (req, res, next) => {
-  // Bot usa BOT_USER_ID como usuário
-  req.user = { id: process.env.BOT_USER_ID || 'admin' };
-  vehicleController.create(req, res, next);
+// Rota para bot criar veículos (vendedores)
+router.post('/bot', botAuthMiddleware, async (req, res, next) => {
+  try {
+    const userId = await resolveBotUserId();
+    req.user = { id: userId };
+    vehicleController.create(req, res, next);
+  } catch (err) {
+    next(err);
+  }
 });
 
 // ✅ NOVO: Rota para o bot mover veículo no pipeline (Kanban do frontend)
@@ -18,9 +23,14 @@ router.patch('/:id/pipeline-bot', botAuthMiddleware, (req, res, next) => {
 });
 
 // Rota pública para bots listar veículos (X-Bot-Key)
-router.get('/publico', botAuthMiddleware, (req, res, next) => {
-  req.user = { id: process.env.BOT_USER_ID || 'admin' };
-  vehicleController.list(req, res, next);
+router.get('/publico', botAuthMiddleware, async (req, res, next) => {
+  try {
+    const userId = await resolveBotUserId();
+    req.user = { id: userId };
+    vehicleController.list(req, res, next);
+  } catch (err) {
+    next(err);
+  }
 });
 
 // Todas as demais rotas de veículos exigem autenticação JWT

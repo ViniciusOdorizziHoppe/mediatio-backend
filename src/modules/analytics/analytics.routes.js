@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { authMiddleware, botAuthMiddleware } = require('../../shared/middlewares/auth.middleware');
 const { success } = require('../../shared/utils/api-response');
+const { resolveBotUserId } = require('../../shared/utils/bot-user');
 const Vehicle = require('../vehicles/vehicle.model');
 const Lead = require('../leads/lead.model');
 const Appointment = require('../appointments/appointment.model');
@@ -14,9 +15,9 @@ const mongoose = require('mongoose');
  */
 router.get('/bot-metrics', botAuthMiddleware, async (req, res, next) => {
   try {
-    const rawUserId = req.query.userId || process.env.BOT_USER_ID;
+    let rawUserId = req.query.userId;
     if (!rawUserId || !mongoose.Types.ObjectId.isValid(rawUserId)) {
-      return res.status(400).json({ success: false, error: 'userId inválido' });
+      rawUserId = await resolveBotUserId();
     }
     const userId = new mongoose.Types.ObjectId(rawUserId);
 
