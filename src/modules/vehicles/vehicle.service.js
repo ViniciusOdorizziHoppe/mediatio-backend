@@ -63,10 +63,11 @@ class VehicleService {
       const calculator = new ScoreCalculator(baseData);
       baseData.score = calculator.calcular();
 
-      let next = await vehicleRepository.nextCodigoNumber(data.tipo);
       let lastError;
-      const MAX_RETRIES = 20;
+      const MAX_RETRIES = 5;
       for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        // Em retries (após 11000), força resync com maior codigo do banco
+        const next = await vehicleRepository.nextCodigoNumber(data.tipo, attempt > 0);
         const codigo = `${prefix}-${year}-${String(next).padStart(4, '0')}`;
         try {
           const vehicle = await vehicleRepository.create({ ...baseData, codigo });
@@ -74,9 +75,8 @@ class VehicleService {
           return vehicle;
         } catch (err) {
           if (err && err.code === 11000) {
-            logger.warn(`Código ${codigo} duplicado (tentativa ${attempt + 1}/${MAX_RETRIES})`);
+            logger.warn(`Código ${codigo} duplicado (tentativa ${attempt + 1}/${MAX_RETRIES}) — refazendo via counter atômico`);
             lastError = err;
-            next += 1;
             continue;
           }
           throw err;

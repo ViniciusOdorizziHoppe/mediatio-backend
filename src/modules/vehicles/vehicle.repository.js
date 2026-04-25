@@ -1,4 +1,5 @@
 const Vehicle = require('./vehicle.model');
+const Counter = require('../../shared/utils/counter.model');
 
 class VehicleRepository {
   async findAll(filters = {}, options = {}) {
@@ -33,20 +34,78 @@ class VehicleRepository {
     return Vehicle.create(data);
   }
 
-  // Próximo número sequencial global do código para um tipo, baseado no
-  // maior código existente do ano corrente (não no count, pois count
-  // falha quando algum veículo é deletado → colisão com `codigo` unique).
-  async nextCodigoNumber(tipo) {
+  // Próximo número sequencial GLOBAL via counter atômico ($inc).
+  // Elimina race conditions: duas requisições paralelas recebem
+  // valores distintos garantidamente.
+  // Na primeira chamada (counter inexistente) ou se solicitado
+  // explicitamente, faz seed olhando o maior codigo existente,
+  // evitando colisão com dados legados.
+  async nextCodigoNumber(tipo, forceResync = false) {
     const prefix = tipo === 'moto' ? 'MOTO' : 'CARRO';
     const year = new Date().getFullYear();
-    const pattern = new RegExp(`^${prefix}-${year}-`);
-    const last = await Vehicle.findOne({ tipo, codigo: pattern })
-      .sort({ codigo: -1 })
-      .select('codigo')
-      .lean();
-    if (!last || !last.codigo) return 1;
-    const match = String(last.codigo).match(/-(\d+)$/);
-    return match ? parseInt(match[1], 10) + 1 : 1;
+    const key = `vehicle:${prefix}:${year}`;
+
+    // Se for resync forçado (após colisão), atualiza o counter para
+    // ser maior que o maior codigo atualmente no banco.
+    if (forceResync) {
+      const pattern = new RegExp(`^${prefix}-${year}-`);
+      const last = await Vehicle.findOne({ codigo: pattern })
+        .sort({ codigo: -1 })
+        .select('codigo')
+        .lean();
+      let lastNum = 0;
+      if (last && last.codigo) {
+        const match = String(last.codigo).match(/-(\d+)$/);
+        lastNum = match ? parseInt(match[1], 10) : 0;
+      }
+      const target = lastNum + 1;
+      const synced = await Counter.findOneAndUpdate(
+        { key },
+        { $max: { seq: target }, $setOnInsert: { key } },
+        { upsert: true, new: true }
+      );
+      // Garante que retorna pelo menos o target após resync, com
+      // incremento atômico subsequente.
+      const after = await Counter.findOneAndUpdate(
+        { key },
+        { $inc: { seq: 1 } },
+        { new: true }
+      );
+      return Math.max(after.seq, synced.seq, target);
+    }
+
+    // Incremento atômico normal
+    const counter = await Counter.findOneAndUpdate(
+      { key },
+      { $inc: { seq: 1 } },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    // Se acabou de ser criado (seq === 1), pode haver veículos
+    // legados com codigos maiores. Faz seed olhando o maior existente
+    // (independente do campo `tipo`, baseando-se apenas no prefixo do
+    // codigo, para tolerar dados legados com tipo ausente/divergente).
+    if (counter.seq === 1) {
+      const pattern = new RegExp(`^${prefix}-${year}-`);
+      const last = await Vehicle.findOne({ codigo: pattern })
+        .sort({ codigo: -1 })
+        .select('codigo')
+        .lean();
+      if (last && last.codigo) {
+        const match = String(last.codigo).match(/-(\d+)$/);
+        const lastNum = match ? parseInt(match[1], 10) : 0;
+        if (lastNum >= counter.seq) {
+          const seeded = await Counter.findOneAndUpdate(
+            { key },
+            { $set: { seq: lastNum + 1 } },
+            { new: true }
+          );
+          return seeded.seq;
+        }
+      }
+    }
+
+    return counter.seq;
   }
 
   async update(id, data) {
