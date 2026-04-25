@@ -87,6 +87,36 @@ const healthHandler = (req, res) => {
 app.get('/health', healthHandler);
 app.get('/api/health', healthHandler);
 
+// ── Diagnóstico: listar índices das collections ───────────────
+app.get('/api/debug/indexes', async (req, res) => {
+  try {
+    const mongoose = require('mongoose');
+    const db = mongoose.connection.db;
+    const collections = await db.listCollections().toArray();
+    const result = {};
+    for (const col of collections) {
+      const indexes = await db.collection(col.name).indexes();
+      result[col.name] = indexes;
+    }
+    res.json({ success: true, data: result });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── Diagnóstico: sincronizar índices do Mongoose (drop stale) ─
+app.post('/api/debug/sync-indexes', async (req, res) => {
+  try {
+    const Vehicle = require('./modules/vehicles/vehicle.model');
+    await Vehicle.syncIndexes();
+    const mongoose = require('mongoose');
+    const indexes = await mongoose.connection.db.collection('vehicles').indexes();
+    res.json({ success: true, message: 'Índices sincronizados', data: indexes });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // ── Rotas da API ──────────────────────────────────────────────
 const loadRoute = (path, mountPoint) => {
   try {

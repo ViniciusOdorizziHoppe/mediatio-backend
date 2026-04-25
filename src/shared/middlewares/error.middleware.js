@@ -24,9 +24,13 @@ const errorMiddleware = (err, req, res, next) => {
   // MongoDB duplicate key
   if (err.code === 11000) {
     const field = Object.keys(err.keyValue || {})[0] || 'campo';
+    const value = err.keyValue ? err.keyValue[field] : undefined;
+    logger.error(`E11000 duplicate key: field=${field}, value=${value}, keyPattern=${JSON.stringify(err.keyPattern)}`);
     return res.status(409).json({
       success: false,
       error: `Registro duplicado: ${field} já existe`,
+      field,
+      keyValue: err.keyValue,
     });
   }
 

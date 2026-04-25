@@ -6,7 +6,16 @@ const logger = require('./src/config/logger');
 const PORT = process.env.PORT || 8000;
 
 // Conecta ao MongoDB antes de iniciar o servidor
-connectDB().then(() => {
+connectDB().then(async () => {
+  // Sincroniza índices: remove stale e cria faltantes
+  try {
+    const Vehicle = require('./src/modules/vehicles/vehicle.model');
+    await Vehicle.syncIndexes();
+    logger.info('Índices do Vehicle sincronizados');
+  } catch (err) {
+    logger.warn('Falha ao sincronizar índices (não-fatal):', err.message);
+  }
+
   app.listen(PORT, '0.0.0.0', () => {
     logger.info(`🚀 Mediatio API rodando na porta ${PORT}`);
     logger.info(`📦 Ambiente: ${process.env.NODE_ENV || 'development'}`);

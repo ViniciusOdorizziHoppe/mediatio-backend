@@ -74,7 +74,12 @@ class VehicleService {
           return vehicle;
         } catch (err) {
           if (err && err.code === 11000) {
-            logger.warn(`Código ${codigo} duplicado (tentativa ${attempt + 1}/${MAX_RETRIES})`);
+            const dupField = Object.keys(err.keyValue || {})[0] || 'unknown';
+            logger.warn(`Duplicate key em '${dupField}' (tentativa ${attempt + 1}/${MAX_RETRIES}), keyValue: ${JSON.stringify(err.keyValue)}`);
+            if (dupField !== 'codigo') {
+              logger.error(`Duplicate key em campo inesperado '${dupField}', não é possível resolver via retry`);
+              throw err;
+            }
             lastError = err;
             next += 1;
             continue;
