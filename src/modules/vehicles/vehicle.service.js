@@ -32,8 +32,9 @@ class VehicleService {
   async createVehicle(data, userId) {
     try {
       // Gera código automático: MOTO-2025-0001 ou CARRO-2025-0001.
-      // Usa o maior código existente (não count) para tolerar deleções e
-      // tenta até 5 vezes caso outro request cadastre no meio (E11000).
+      // Usa o maior código existente global (não count nem por-usuário)
+      // para tolerar deleções e multi-usuário. Retenta até MAX_RETRIES
+      // vezes caso haja colisão por race condition (E11000).
       const year = new Date().getFullYear();
       const prefix = data.tipo === 'moto' ? 'MOTO' : 'CARRO';
 
@@ -64,15 +65,16 @@ class VehicleService {
 
       let next = await vehicleRepository.nextCodigoNumber(data.tipo);
       let lastError;
-      for (let attempt = 0; attempt < 5; attempt++) {
+      const MAX_RETRIES = 20;
+      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
         const codigo = `${prefix}-${year}-${String(next).padStart(4, '0')}`;
         try {
           const vehicle = await vehicleRepository.create({ ...baseData, codigo });
           logger.info(`Veículo criado: ${vehicle.codigo} por ${userId}`);
           return vehicle;
         } catch (err) {
-          // Erro de duplicate key (índice único de `codigo`) → tenta o próximo número.
           if (err && err.code === 11000) {
+            logger.warn(`Código ${codigo} duplicado (tentativa ${attempt + 1}/${MAX_RETRIES})`);
             lastError = err;
             next += 1;
             continue;
@@ -80,6 +82,7 @@ class VehicleService {
           throw err;
         }
       }
+      logger.error(`Falha ao gerar código único após ${MAX_RETRIES} tentativas para ${prefix}-${year}`);
       throw lastError || new Error('Não foi possível gerar código único');
     } catch (error) {
       logger.error('Erro ao criar veículo:', error);
