@@ -75,7 +75,7 @@ class VehicleService {
           return vehicle;
         } catch (err) {
           if (err && err.code === 11000) {
-            logger.warn(`Código ${codigo} duplicado (tentativa ${attempt + 1}/${MAX_RETRIES}) — refazendo via counter atômico`);
+            logger.warn(`[codigo] colisão attempt=${attempt + 1}/${MAX_RETRIES} codigo=${codigo} keyValue=${JSON.stringify(err.keyValue || {})} keyPattern=${JSON.stringify(err.keyPattern || {})}`);
             lastError = err;
             continue;
           }

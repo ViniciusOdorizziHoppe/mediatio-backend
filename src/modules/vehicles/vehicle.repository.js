@@ -1,5 +1,6 @@
 const Vehicle = require('./vehicle.model');
 const Counter = require('../../shared/utils/counter.model');
+const logger = require('../../config/logger');
 
 class VehicleRepository {
   async findAll(filters = {}, options = {}) {
@@ -46,27 +47,25 @@ class VehicleRepository {
   // sort({codigo:-1}) (lex), pois codigos legados com padding misto
   // (ex: "CARRO-2026-99" e "CARRO-2026-0500") quebram a ordenação
   // alfabética e levam a colisões persistentes.
+  // Estratégia: busca TODOS os codigos matching e faz parse numérico
+  // em JavaScript. Garante correção independente de padding misto,
+  // sintaxe de aggregation ou versão do driver. Dataset por
+  // (prefix, year) é pequeno (centenas/poucos milhares por ano),
+  // então a query é rápida.
   async _maxCodigoNum(prefix, year) {
     const pattern = new RegExp(`^${prefix}-${year}-`);
-    const result = await Vehicle.aggregate([
-      { $match: { codigo: { $regex: pattern } } },
-      {
-        $project: {
-          num: {
-            $convert: {
-              input: {
-                $arrayElemAt: [{ $split: ['$codigo', '-'] }, -1],
-              },
-              to: 'int',
-              onError: 0,
-              onNull: 0,
-            },
-          },
-        },
-      },
-      { $group: { _id: null, max: { $max: '$num' } } },
-    ]);
-    return result[0]?.max || 0;
+    const docs = await Vehicle.find({ codigo: pattern })
+      .select('codigo -_id')
+      .lean();
+    let max = 0;
+    for (const d of docs) {
+      if (!d || !d.codigo) continue;
+      const m = String(d.codigo).match(/-(\d+)$/);
+      if (!m) continue;
+      const n = parseInt(m[1], 10);
+      if (Number.isFinite(n) && n > max) max = n;
+    }
+    return max;
   }
 
   async nextCodigoNumber(tipo, forceResync = false) {
@@ -78,6 +77,7 @@ class VehicleRepository {
     if (forceResync) {
       const lastNum = await this._maxCodigoNum(prefix, year);
       const target = lastNum + 1;
+      logger.info(`[codigo] resync key=${key} dbMax=${lastNum} target=${target}`);
       // $max só sobe; nunca desce. Garante atomicidade contra concorrência.
       await Counter.findOneAndUpdate(
         { key },
@@ -90,6 +90,7 @@ class VehicleRepository {
         { $inc: { seq: 1 } },
         { new: true }
       );
+      logger.info(`[codigo] resync done key=${key} returned=${after.seq}`);
       return after.seq;
     }
 
@@ -101,20 +102,22 @@ class VehicleRepository {
     );
 
     // Primeira utilização do counter para esta chave: pode haver
-    // veículos legados com codigos maiores. Faz seed via aggregation
-    // (numérica) para tolerar dados pré-existentes.
+    // veículos legados com codigos maiores. Faz seed via parse JS.
     if (counter.seq === 1) {
       const lastNum = await this._maxCodigoNum(prefix, year);
+      logger.info(`[codigo] seed key=${key} dbMax=${lastNum}`);
       if (lastNum >= 1) {
         const seeded = await Counter.findOneAndUpdate(
           { key },
           { $set: { seq: lastNum + 1 } },
           { new: true }
         );
+        logger.info(`[codigo] seed done key=${key} returned=${seeded.seq}`);
         return seeded.seq;
       }
     }
 
+    logger.info(`[codigo] inc key=${key} returned=${counter.seq}`);
     return counter.seq;
   }
 
