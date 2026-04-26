@@ -38,40 +38,59 @@ class VehicleRepository {
   // Elimina race conditions: duas requisições paralelas recebem
   // valores distintos garantidamente.
   // Na primeira chamada (counter inexistente) ou se solicitado
-  // explicitamente, faz seed olhando o maior codigo existente,
-  // evitando colisão com dados legados.
+  // explicitamente (forceResync após colisão 11000), faz seed
+  // olhando o maior codigo numérico existente.
+  //
+  // IMPORTANTE: o "maior codigo" é calculado via aggregation
+  // extraindo a parte numérica e usando $max numérico — NUNCA por
+  // sort({codigo:-1}) (lex), pois codigos legados com padding misto
+  // (ex: "CARRO-2026-99" e "CARRO-2026-0500") quebram a ordenação
+  // alfabética e levam a colisões persistentes.
+  async _maxCodigoNum(prefix, year) {
+    const pattern = new RegExp(`^${prefix}-${year}-`);
+    const result = await Vehicle.aggregate([
+      { $match: { codigo: { $regex: pattern } } },
+      {
+        $project: {
+          num: {
+            $convert: {
+              input: {
+                $arrayElemAt: [{ $split: ['$codigo', '-'] }, -1],
+              },
+              to: 'int',
+              onError: 0,
+              onNull: 0,
+            },
+          },
+        },
+      },
+      { $group: { _id: null, max: { $max: '$num' } } },
+    ]);
+    return result[0]?.max || 0;
+  }
+
   async nextCodigoNumber(tipo, forceResync = false) {
     const prefix = tipo === 'moto' ? 'MOTO' : 'CARRO';
     const year = new Date().getFullYear();
     const key = `vehicle:${prefix}:${year}`;
 
-    // Se for resync forçado (após colisão), atualiza o counter para
-    // ser maior que o maior codigo atualmente no banco.
+    // Resync forçado (após colisão): atualiza counter para max real + 1.
     if (forceResync) {
-      const pattern = new RegExp(`^${prefix}-${year}-`);
-      const last = await Vehicle.findOne({ codigo: pattern })
-        .sort({ codigo: -1 })
-        .select('codigo')
-        .lean();
-      let lastNum = 0;
-      if (last && last.codigo) {
-        const match = String(last.codigo).match(/-(\d+)$/);
-        lastNum = match ? parseInt(match[1], 10) : 0;
-      }
+      const lastNum = await this._maxCodigoNum(prefix, year);
       const target = lastNum + 1;
-      const synced = await Counter.findOneAndUpdate(
+      // $max só sobe; nunca desce. Garante atomicidade contra concorrência.
+      await Counter.findOneAndUpdate(
         { key },
         { $max: { seq: target }, $setOnInsert: { key } },
         { upsert: true, new: true }
       );
-      // Garante que retorna pelo menos o target após resync, com
-      // incremento atômico subsequente.
+      // Incremento atômico subsequente para reservar um número exclusivo.
       const after = await Counter.findOneAndUpdate(
         { key },
         { $inc: { seq: 1 } },
         { new: true }
       );
-      return Math.max(after.seq, synced.seq, target);
+      return after.seq;
     }
 
     // Incremento atômico normal
@@ -81,27 +100,18 @@ class VehicleRepository {
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    // Se acabou de ser criado (seq === 1), pode haver veículos
-    // legados com codigos maiores. Faz seed olhando o maior existente
-    // (independente do campo `tipo`, baseando-se apenas no prefixo do
-    // codigo, para tolerar dados legados com tipo ausente/divergente).
+    // Primeira utilização do counter para esta chave: pode haver
+    // veículos legados com codigos maiores. Faz seed via aggregation
+    // (numérica) para tolerar dados pré-existentes.
     if (counter.seq === 1) {
-      const pattern = new RegExp(`^${prefix}-${year}-`);
-      const last = await Vehicle.findOne({ codigo: pattern })
-        .sort({ codigo: -1 })
-        .select('codigo')
-        .lean();
-      if (last && last.codigo) {
-        const match = String(last.codigo).match(/-(\d+)$/);
-        const lastNum = match ? parseInt(match[1], 10) : 0;
-        if (lastNum >= counter.seq) {
-          const seeded = await Counter.findOneAndUpdate(
-            { key },
-            { $set: { seq: lastNum + 1 } },
-            { new: true }
-          );
-          return seeded.seq;
-        }
+      const lastNum = await this._maxCodigoNum(prefix, year);
+      if (lastNum >= 1) {
+        const seeded = await Counter.findOneAndUpdate(
+          { key },
+          { $set: { seq: lastNum + 1 } },
+          { new: true }
+        );
+        return seeded.seq;
       }
     }
 
