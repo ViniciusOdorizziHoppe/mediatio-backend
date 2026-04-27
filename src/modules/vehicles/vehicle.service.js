@@ -64,14 +64,16 @@ class VehicleService {
       baseData.score = calculator.calcular();
 
       let lastError;
-      const MAX_RETRIES = 5;
+      const MAX_RETRIES = 30;
       for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-        // Em retries (após 11000), força resync com maior codigo do banco
-        const next = await vehicleRepository.nextCodigoNumber(data.tipo, attempt > 0);
+        // A cada tentativa, busca max real do banco e adiciona offset
+        // crescente. Garante convergência mesmo com concorrência alta
+        // ou dados legados em qualquer estado.
+        const next = await vehicleRepository.nextCodigoNumber(data.tipo, attempt);
         const codigo = `${prefix}-${year}-${String(next).padStart(4, '0')}`;
         try {
           const vehicle = await vehicleRepository.create({ ...baseData, codigo });
-          logger.info(`Veículo criado: ${vehicle.codigo} por ${userId}`);
+          logger.info(`Veículo criado: ${vehicle.codigo} por ${userId} (attempt=${attempt + 1})`);
           return vehicle;
         } catch (err) {
           if (err && err.code === 11000) {

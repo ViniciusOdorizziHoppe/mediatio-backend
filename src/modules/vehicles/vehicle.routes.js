@@ -38,14 +38,13 @@ router.use(authMiddleware);
 
 // GET /api/vehicles/_diag/codigo  — diagnóstico temporário (autenticado)
 // Retorna: índices da coleção, max numérico real para CARRO/MOTO do ano,
-// estado atual dos counters, total de docs por prefixo. Útil para
-// identificar a causa do 409.
+// total de docs por prefixo. Útil para identificar a causa do 409.
 router.get('/_diag/codigo', async (req, res, next) => {
   try {
     const Vehicle = require('./vehicle.model');
-    const Counter = require('../../shared/utils/counter.model');
     const vehicleRepository = require('./vehicle.repository');
     const year = new Date().getFullYear();
+    const pkg = require('../../../package.json');
 
     const indexes = await Vehicle.collection.indexes();
 
@@ -60,13 +59,11 @@ router.get('/_diag/codigo', async (req, res, next) => {
     const motoSample = await Vehicle.find({ codigo: new RegExp(`^MOTO-${year}-`) })
       .select('codigo -_id').sort({ createdAt: -1 }).limit(20).lean();
 
-    const counters = await Counter.find({}).lean();
-
     res.json({
       success: true,
       year,
+      apiVersion: pkg.version,
       indexes,
-      counters,
       carro: { max: carroMax, count: carroCount, recent20: carroSample.map((v) => v.codigo) },
       moto: { max: motoMax, count: motoCount, recent20: motoSample.map((v) => v.codigo) },
     });

@@ -1,6 +1,6 @@
 {
   "name": "mediatio-api",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Mediatio - API de CRM para Intermediação de Veículos",
   "main": "server.js",
   "scripts": {

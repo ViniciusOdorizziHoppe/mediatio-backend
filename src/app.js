@@ -74,6 +74,7 @@ app.use((req, res, next) => {
 // ── Health Check ──────────────────────────────────────────────
 const healthHandler = (req, res) => {
   const mongoose = require('mongoose');
+  const pkg = require('../package.json');
   res.json({
     success: true,
     status: 'ok',
@@ -82,6 +83,7 @@ const healthHandler = (req, res) => {
     mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
     node: process.version,
     env: process.env.NODE_ENV,
+    apiVersion: pkg.version,
   });
 };
 app.get('/health', healthHandler);

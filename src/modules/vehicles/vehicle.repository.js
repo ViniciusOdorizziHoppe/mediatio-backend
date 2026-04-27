@@ -1,5 +1,4 @@
 const Vehicle = require('./vehicle.model');
-const Counter = require('../../shared/utils/counter.model');
 const logger = require('../../config/logger');
 
 class VehicleRepository {
@@ -35,18 +34,7 @@ class VehicleRepository {
     return Vehicle.create(data);
   }
 
-  // Próximo número sequencial GLOBAL via counter atômico ($inc).
-  // Elimina race conditions: duas requisições paralelas recebem
-  // valores distintos garantidamente.
-  // Na primeira chamada (counter inexistente) ou se solicitado
-  // explicitamente (forceResync após colisão 11000), faz seed
-  // olhando o maior codigo numérico existente.
-  //
-  // IMPORTANTE: o "maior codigo" é calculado via aggregation
-  // extraindo a parte numérica e usando $max numérico — NUNCA por
-  // sort({codigo:-1}) (lex), pois codigos legados com padding misto
-  // (ex: "CARRO-2026-99" e "CARRO-2026-0500") quebram a ordenação
-  // alfabética e levam a colisões persistentes.
+  // Maior número numérico de codigo já existente para um prefix+year.
   // Estratégia: busca TODOS os codigos matching e faz parse numérico
   // em JavaScript. Garante correção independente de padding misto,
   // sintaxe de aggregation ou versão do driver. Dataset por
@@ -68,57 +56,20 @@ class VehicleRepository {
     return max;
   }
 
-  async nextCodigoNumber(tipo, forceResync = false) {
+  // Próximo número sequencial para codigo de veículo.
+  // Estratégia simples e robusta: busca o maior codigo numérico real
+  // do banco (find().lean() + parse JS) e retorna max + 1 + offset.
+  // O offset (default 0) é incrementado no service em cada retry após
+  // colisão, garantindo que mesmo sob concorrência ou estado corrompido
+  // de algum counter persistido, sempre haja convergência.
+  // Não depende de coleção Counter — evita problemas de estado.
+  async nextCodigoNumber(tipo, offset = 0) {
     const prefix = tipo === 'moto' ? 'MOTO' : 'CARRO';
     const year = new Date().getFullYear();
-    const key = `vehicle:${prefix}:${year}`;
-
-    // Resync forçado (após colisão): atualiza counter para max real + 1.
-    if (forceResync) {
-      const lastNum = await this._maxCodigoNum(prefix, year);
-      const target = lastNum + 1;
-      logger.info(`[codigo] resync key=${key} dbMax=${lastNum} target=${target}`);
-      // $max só sobe; nunca desce. Garante atomicidade contra concorrência.
-      await Counter.findOneAndUpdate(
-        { key },
-        { $max: { seq: target }, $setOnInsert: { key } },
-        { upsert: true, new: true }
-      );
-      // Incremento atômico subsequente para reservar um número exclusivo.
-      const after = await Counter.findOneAndUpdate(
-        { key },
-        { $inc: { seq: 1 } },
-        { new: true }
-      );
-      logger.info(`[codigo] resync done key=${key} returned=${after.seq}`);
-      return after.seq;
-    }
-
-    // Incremento atômico normal
-    const counter = await Counter.findOneAndUpdate(
-      { key },
-      { $inc: { seq: 1 } },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
-    );
-
-    // Primeira utilização do counter para esta chave: pode haver
-    // veículos legados com codigos maiores. Faz seed via parse JS.
-    if (counter.seq === 1) {
-      const lastNum = await this._maxCodigoNum(prefix, year);
-      logger.info(`[codigo] seed key=${key} dbMax=${lastNum}`);
-      if (lastNum >= 1) {
-        const seeded = await Counter.findOneAndUpdate(
-          { key },
-          { $set: { seq: lastNum + 1 } },
-          { new: true }
-        );
-        logger.info(`[codigo] seed done key=${key} returned=${seeded.seq}`);
-        return seeded.seq;
-      }
-    }
-
-    logger.info(`[codigo] inc key=${key} returned=${counter.seq}`);
-    return counter.seq;
+    const lastNum = await this._maxCodigoNum(prefix, year);
+    const next = lastNum + 1 + offset;
+    logger.info(`[codigo] tipo=${tipo} dbMax=${lastNum} offset=${offset} returned=${next}`);
+    return next;
   }
 
   async update(id, data) {
