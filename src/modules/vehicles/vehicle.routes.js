@@ -36,6 +36,45 @@ router.get('/publico', botAuthMiddleware, async (req, res, next) => {
 // Todas as demais rotas de veículos exigem autenticação JWT
 router.use(authMiddleware);
 
+// GET /api/vehicles/_diag/codigo  — diagnóstico temporário (autenticado)
+// Retorna: índices da coleção, max numérico real para CARRO/MOTO do ano,
+// estado atual dos counters, total de docs por prefixo. Útil para
+// identificar a causa do 409.
+router.get('/_diag/codigo', async (req, res, next) => {
+  try {
+    const Vehicle = require('./vehicle.model');
+    const Counter = require('../../shared/utils/counter.model');
+    const vehicleRepository = require('./vehicle.repository');
+    const year = new Date().getFullYear();
+
+    const indexes = await Vehicle.collection.indexes();
+
+    const carroMax = await vehicleRepository._maxCodigoNum('CARRO', year);
+    const motoMax = await vehicleRepository._maxCodigoNum('MOTO', year);
+
+    const carroCount = await Vehicle.countDocuments({ codigo: new RegExp(`^CARRO-${year}-`) });
+    const motoCount = await Vehicle.countDocuments({ codigo: new RegExp(`^MOTO-${year}-`) });
+
+    const carroSample = await Vehicle.find({ codigo: new RegExp(`^CARRO-${year}-`) })
+      .select('codigo -_id').sort({ createdAt: -1 }).limit(20).lean();
+    const motoSample = await Vehicle.find({ codigo: new RegExp(`^MOTO-${year}-`) })
+      .select('codigo -_id').sort({ createdAt: -1 }).limit(20).lean();
+
+    const counters = await Counter.find({}).lean();
+
+    res.json({
+      success: true,
+      year,
+      indexes,
+      counters,
+      carro: { max: carroMax, count: carroCount, recent20: carroSample.map((v) => v.codigo) },
+      moto: { max: motoMax, count: motoCount, recent20: motoSample.map((v) => v.codigo) },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/vehicles
 router.get('/', (req, res, next) => vehicleController.list(req, res, next));
 
