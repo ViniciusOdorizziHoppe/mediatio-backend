@@ -1,6 +1,10 @@
 const vehicleService = require('./vehicle.service');
+const vehicleRepository = require('./vehicle.repository');
+const ScoreCalculator = require('./vehicle.score');
 const { createVehicleSchema, updateVehicleSchema, updateStatusSchema } = require('./vehicle.schema');
 const { success, paginated } = require('../../shared/utils/api-response');
+const { upload, uploadToCloudinary } = require('../../shared/middlewares/upload.middleware');
+const logger = require('../../config/logger');
 
 class VehicleController {
   async list(req, res, next) {
@@ -12,11 +16,9 @@ class VehicleController {
       if (search) filters.search = search;
       if (minScore) filters.minScore = minScore;
 
-      // Se for bot, usa o BOT_USER_ID ou o primeiro admin encontrado
       const userId = req.user?.id || process.env.BOT_USER_ID;
-      
       if (!userId) {
-        return res.status(400).json({ success: false, error: 'userId não identificado para esta requisição' });
+        return res.status(400).json({ success: false, error: 'userId nao identificado para esta requisicao' });
       }
 
       const result = await vehicleService.listVehicles(filters, { page, limit }, userId);
@@ -78,7 +80,7 @@ class VehicleController {
   async delete(req, res, next) {
     try {
       await vehicleService.deleteVehicle(req.params.id, req.user.id);
-      res.json(success({ message: 'Veículo removido com sucesso' }));
+      res.json(success({ message: 'Veiculo removido com sucesso' }));
     } catch (err) {
       next(err);
     }
@@ -97,6 +99,62 @@ class VehicleController {
     try {
       const score = await vehicleService.recalculateScore(req.params.id, req.user.id);
       res.json(success(score));
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * POST /api/vehicles/:id/photos
+   * Upload de fotos do veiculo (multipart: campo 'photos')
+   */
+  async uploadPhotos(req, res, next) {
+    try {
+      const vehicle = await vehicleService.getVehicleById(req.params.id, req.user.id);
+
+      if (!req.files || req.files.length === 0) {
+        return res.status(400).json({ success: false, error: 'Nenhuma foto enviada' });
+      }
+
+      const uploadedPhotos = [];
+      for (const file of req.files) {
+        const publicId = `mediatio/vehicles/${req.params.id}/${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+        const result = await uploadToCloudinary(file.buffer, `mediatio/vehicles/${req.params.id}`, publicId);
+        uploadedPhotos.push({
+          url: result.secure_url,
+          publicId: result.public_id,
+          width: result.width,
+          height: result.height,
+          uploadedAt: new Date(),
+        });
+      }
+
+      // Atualiza fotos no veiculo
+      const fotosAtuais = vehicle.fotos?.originais || [];
+      const novasFotos = [...fotosAtuais, ...uploadedPhotos];
+
+      // Se for a primeira foto, define como principal
+      const updateData = {
+        fotos: {
+          ...vehicle.fotos,
+          originais: novasFotos,
+          principal: vehicle.fotos?.principal || uploadedPhotos[0].url,
+        },
+      };
+
+      await vehicleRepository.update(req.params.id, updateData);
+
+      // Recalcula score (fotos afetam o score)
+      const calculator = new ScoreCalculator({ ...vehicle.toObject(), ...updateData });
+      const newScore = calculator.calcular();
+      await vehicleRepository.update(req.params.id, { score: newScore });
+
+      logger.info(`${uploadedPhotos.length} foto(s) uploaded para veiculo ${req.params.id}`);
+      res.status(201).json(success({
+        uploaded: uploadedPhotos,
+        totalFotos: novasFotos.length,
+        score: newScore,
+      }));
     } catch (err) {
       next(err);
     }

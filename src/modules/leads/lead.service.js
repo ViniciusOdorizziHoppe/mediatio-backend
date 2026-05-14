@@ -76,6 +76,42 @@ class LeadService {
     await this.getLeadById(id, userId);
     return leadRepository.delete(id);
   }
+
+  /**
+   * Vincula um lead a um veiculo especifico
+   */
+  async assignToVehicle(leadId, vehicleId, userId) {
+    await this.getLeadById(leadId, userId);
+    const Vehicle = require('../vehicles/vehicle.model');
+
+    const vehicle = await Vehicle.findById(vehicleId);
+    if (!vehicle) {
+      const err = new Error('Veiculo nao encontrado');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    // Atualiza o lead com o vehicleId
+    const updatedLead = await leadRepository.update(leadId, {
+      'interesse.vehicleId': vehicleId,
+      ultimoContato: new Date(),
+    });
+
+    // Adiciona o lead ao array de leads do veiculo (se nao estiver la)
+    if (!vehicle.leads.includes(leadId)) {
+      vehicle.leads.push(leadId);
+      await vehicle.save();
+    }
+
+    // Recalcula score do veiculo (leads afetam o score)
+    const ScoreCalculator = require('../vehicles/vehicle.score');
+    const calculator = new ScoreCalculator(vehicle);
+    const newScore = calculator.calcular();
+    await Vehicle.findByIdAndUpdate(vehicleId, { score: newScore });
+
+    logger.info(`Lead ${leadId} vinculado ao veiculo ${vehicleId}`);
+    return updatedLead;
+  }
 }
 
 module.exports = new LeadService();

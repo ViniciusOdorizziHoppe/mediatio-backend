@@ -3,8 +3,9 @@ const router = express.Router();
 const vehicleController = require('./vehicle.controller');
 const { authMiddleware, botAuthMiddleware } = require('../../shared/middlewares/auth.middleware');
 const { resolveBotUserId } = require('../../shared/utils/bot-user');
+const { upload } = require('../../shared/middlewares/upload.middleware');
 
-// Rota para bot criar veículos (vendedores)
+// Rota para bot criar veiculos (vendedores)
 router.post('/bot', botAuthMiddleware, async (req, res, next) => {
   try {
     const userId = await resolveBotUserId();
@@ -15,14 +16,12 @@ router.post('/bot', botAuthMiddleware, async (req, res, next) => {
   }
 });
 
-// ✅ NOVO: Rota para o bot mover veículo no pipeline (Kanban do frontend)
-// durante as conversas com leads. Autenticada via X-Bot-Key, nao exige JWT
-// e nao faz check de ownership (bot opera em nome do BOT_USER_ID).
+// Rota para o bot mover veiculo no pipeline (Kanban do frontend)
 router.patch('/:id/pipeline-bot', botAuthMiddleware, (req, res, next) => {
   vehicleController.updateStatusAsBot(req, res, next);
 });
 
-// Rota pública para bots listar veículos (X-Bot-Key)
+// Rota publica para bots listar veiculos (X-Bot-Key)
 router.get('/publico', botAuthMiddleware, async (req, res, next) => {
   try {
     const userId = await resolveBotUserId();
@@ -33,12 +32,10 @@ router.get('/publico', botAuthMiddleware, async (req, res, next) => {
   }
 });
 
-// Todas as demais rotas de veículos exigem autenticação JWT
+// Todas as demais rotas de veiculos exigem autenticacao JWT
 router.use(authMiddleware);
 
-// GET /api/vehicles/_diag/codigo  — diagnóstico temporário (autenticado)
-// Retorna: índices da coleção, max numérico real para CARRO/MOTO do ano,
-// total de docs por prefixo. Útil para identificar a causa do 409.
+// GET /api/vehicles/_diag/codigo  — diagnostico temporario (autenticado)
 router.get('/_diag/codigo', async (req, res, next) => {
   try {
     const Vehicle = require('./vehicle.model');
@@ -47,23 +44,17 @@ router.get('/_diag/codigo', async (req, res, next) => {
     const pkg = require('../../../package.json');
 
     const indexes = await Vehicle.collection.indexes();
-
     const carroMax = await vehicleRepository._maxCodigoNum('CARRO', year);
     const motoMax = await vehicleRepository._maxCodigoNum('MOTO', year);
-
     const carroCount = await Vehicle.countDocuments({ codigo: new RegExp(`^CARRO-${year}-`) });
     const motoCount = await Vehicle.countDocuments({ codigo: new RegExp(`^MOTO-${year}-`) });
-
     const carroSample = await Vehicle.find({ codigo: new RegExp(`^CARRO-${year}-`) })
       .select('codigo -_id').sort({ createdAt: -1 }).limit(20).lean();
     const motoSample = await Vehicle.find({ codigo: new RegExp(`^MOTO-${year}-`) })
       .select('codigo -_id').sort({ createdAt: -1 }).limit(20).lean();
 
     res.json({
-      success: true,
-      year,
-      apiVersion: pkg.version,
-      indexes,
+      success: true, year, apiVersion: pkg.version, indexes,
       carro: { max: carroMax, count: carroCount, recent20: carroSample.map((v) => v.codigo) },
       moto: { max: motoMax, count: motoCount, recent20: motoSample.map((v) => v.codigo) },
     });
@@ -74,6 +65,9 @@ router.get('/_diag/codigo', async (req, res, next) => {
 
 // GET /api/vehicles
 router.get('/', (req, res, next) => vehicleController.list(req, res, next));
+
+// POST /api/vehicles/:id/photos — upload de fotos (antes de /:id para nao conflitar)
+router.post('/:id/photos', upload.array('photos', 10), (req, res, next) => vehicleController.uploadPhotos(req, res, next));
 
 // GET /api/vehicles/:id
 router.get('/:id', (req, res, next) => vehicleController.getById(req, res, next));

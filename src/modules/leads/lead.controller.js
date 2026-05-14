@@ -70,6 +70,20 @@ class LeadController {
     }
   }
 
+  // Vincula lead a um veiculo
+  async assignToVehicle(req, res, next) {
+    try {
+      const lead = await leadService.assignToVehicle(
+        req.params.id,
+        req.params.vehicleId,
+        req.user.id
+      );
+      res.json(success(lead));
+    } catch (err) {
+      next(err);
+    }
+  }
+
   // Endpoint para bot (usa X-Bot-Key ao invés de JWT)
   async botCreate(req, res, next) {
     try {

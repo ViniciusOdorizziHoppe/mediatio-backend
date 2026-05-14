@@ -27,4 +27,7 @@ router.patch('/:id/status', (req, res, next) => leadController.updateStatus(req,
 // DELETE /api/leads/:id
 router.delete('/:id', (req, res, next) => leadController.delete(req, res, next));
 
+// PATCH /api/leads/:id/assign/:vehicleId — vincular lead a veiculo
+router.patch('/:id/assign/:vehicleId', (req, res, next) => leadController.assignToVehicle(req, res, next));
+
 module.exports = router;
