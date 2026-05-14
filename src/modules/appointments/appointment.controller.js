@@ -1,5 +1,6 @@
 const Appointment = require('./appointment.model');
-const apiResponse = require('../../shared/utils/api-response');
+const { success } = require('../../shared/utils/api-response');
+const logger = require('../../config/logger');
 
 class AppointmentController {
   async list(req, res, next) {
@@ -16,9 +17,12 @@ class AppointmentController {
       const appointments = await Appointment.find(query)
         .populate('leadId', 'nome whatsapp')
         .populate('vehicleId', 'marca modelo ano placa')
-        .sort('data');
-      return apiResponse.success(res, appointments);
+        .sort({ data: 1 })
+        .lean();
+
+      res.json(success(appointments));
     } catch (e) {
+      logger.error('Erro ao listar appointments:', e);
       next(e);
     }
   }
@@ -27,20 +31,11 @@ class AppointmentController {
     try {
       const { leadId, vehicleId, data, tipo, status, notas } = req.body;
 
-      // ✅ VALIDAÇÃO: leadId é obrigatório
       if (!leadId) {
-        return res.status(400).json({ 
-          success: false, 
-          error: 'leadId é obrigatório' 
-        });
+        return res.status(400).json({ success: false, error: 'leadId e obrigatorio' });
       }
-
-      // ✅ VALIDAÇÃO: data é obrigatória
       if (!data) {
-        return res.status(400).json({ 
-          success: false, 
-          error: 'data é obrigatória' 
-        });
+        return res.status(400).json({ success: false, error: 'data e obrigatoria' });
       }
 
       const appointment = await Appointment.create({
@@ -53,8 +48,13 @@ class AppointmentController {
         criadoPor: req.user.id,
       });
 
-      return apiResponse.success(res, appointment, 201);
+      const populated = await Appointment.findById(appointment._id)
+        .populate('leadId', 'nome whatsapp')
+        .populate('vehicleId', 'marca modelo ano placa');
+
+      res.status(201).json(success(populated));
     } catch (e) {
+      logger.error('Erro ao criar appointment:', e);
       next(e);
     }
   }
@@ -66,10 +66,14 @@ class AppointmentController {
         { _id: id, criadoPor: req.user.id },
         { $set: req.body },
         { new: true }
-      );
-      if (!appointment) return res.status(404).json({ success: false, error: 'Agendamento não encontrado' });
-      return apiResponse.success(res, appointment);
+      ).populate('leadId', 'nome whatsapp').populate('vehicleId', 'marca modelo ano placa');
+
+      if (!appointment) {
+        return res.status(404).json({ success: false, error: 'Agendamento nao encontrado' });
+      }
+      res.json(success(appointment));
     } catch (e) {
+      logger.error('Erro ao atualizar appointment:', e);
       next(e);
     }
   }
@@ -78,9 +82,12 @@ class AppointmentController {
     try {
       const { id } = req.params;
       const appointment = await Appointment.findOneAndDelete({ _id: id, criadoPor: req.user.id });
-      if (!appointment) return res.status(404).json({ success: false, error: 'Agendamento não encontrado' });
-      return apiResponse.success(res, { message: 'Agendamento removido' });
+      if (!appointment) {
+        return res.status(404).json({ success: false, error: 'Agendamento nao encontrado' });
+      }
+      res.json(success({ message: 'Agendamento removido' }));
     } catch (e) {
+      logger.error('Erro ao deletar appointment:', e);
       next(e);
     }
   }
