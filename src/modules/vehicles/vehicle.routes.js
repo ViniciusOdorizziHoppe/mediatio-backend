@@ -3,7 +3,9 @@ const router = express.Router();
 const vehicleController = require('./vehicle.controller');
 const { authMiddleware, botAuthMiddleware } = require('../../shared/middlewares/auth.middleware');
 const { resolveBotUserId } = require('../../shared/utils/bot-user');
-const { upload } = require('../../shared/middlewares/upload.middleware');
+
+// Lazy load do upload middleware (evita crash se cloudinary nao instalado)
+const getUpload = () => require('../../shared/middlewares/upload.middleware').upload;
 
 // Rota para bot criar veiculos (vendedores)
 router.post('/bot', botAuthMiddleware, async (req, res, next) => {
@@ -67,7 +69,7 @@ router.get('/_diag/codigo', async (req, res, next) => {
 router.get('/', (req, res, next) => vehicleController.list(req, res, next));
 
 // POST /api/vehicles/:id/photos — upload de fotos (antes de /:id para nao conflitar)
-router.post('/:id/photos', upload.array('photos', 10), (req, res, next) => vehicleController.uploadPhotos(req, res, next));
+router.post('/:id/photos', (req, res, next) => getUpload().array('photos', 10)(req, res, next), (req, res, next) => vehicleController.uploadPhotos(req, res, next));
 
 // GET /api/vehicles/:id
 router.get('/:id', (req, res, next) => vehicleController.getById(req, res, next));
