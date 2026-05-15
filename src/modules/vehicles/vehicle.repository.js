@@ -118,6 +118,7 @@ class VehicleRepository {
       ];
     }
     if (filters.minScore) query['score.valor'] = { $gte: parseInt(filters.minScore) };
+    if (filters.origem) query.origem = filters.origem;
     return query;
   }
 }

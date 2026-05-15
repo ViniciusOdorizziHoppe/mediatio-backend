@@ -6,12 +6,13 @@ const logger = require('../../config/logger');
 class VehicleController {
   async list(req, res, next) {
     try {
-      const { page = 1, limit = 20, status, tipo, search, minScore } = req.query;
+      const { page = 1, limit = 20, status, tipo, search, minScore, origem } = req.query;
       const filters = {};
       if (status) filters.status = status;
       if (tipo) filters.tipo = tipo;
       if (search) filters.search = search;
       if (minScore) filters.minScore = minScore;
+      if (origem) filters.origem = origem;
 
       const userId = req.user?.id || process.env.BOT_USER_ID;
       if (!userId) {

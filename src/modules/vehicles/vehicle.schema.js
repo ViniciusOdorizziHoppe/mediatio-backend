@@ -37,6 +37,14 @@ const createVehicleSchema = z.object({
       publicId: z.string().optional().default(''),
     })).optional(),
   }).optional(),
+  origem: z.enum(['particular', 'concessionaria']).optional().default('particular'),
+  concessionaria: z.object({
+    nome: z.string().optional(),
+    contato: z.string().optional(),
+    whatsapp: z.string().optional(),
+    cidade: z.string().optional(),
+    comissaoPadrao: z.number().min(0).max(100).optional(),
+  }).optional(),
 });
 
 const updateVehicleSchema = createVehicleSchema.partial();

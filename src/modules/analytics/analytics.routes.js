@@ -294,4 +294,29 @@ router.get('/bot-performance', async (req, res, next) => {
   }
 });
 
+/**
+ * GET /api/analytics/concessionarias
+ * Resumo das concessionarias parceiras (veiculos, valor, spread)
+ */
+router.get('/concessionarias', async (req, res, next) => {
+  try {
+    const userId = new mongoose.Types.ObjectId(req.user.id);
+    const data = await Vehicle.aggregate([
+      { $match: { cadastradoPor: userId, origem: 'concessionaria' } },
+      { $group: {
+        _id: '$concessionaria.nome',
+        totalVeiculos: { $sum: 1 },
+        valorTotal: { $sum: '$precos.venda' },
+        spreadTotal: { $sum: { $subtract: ['$precos.venda', '$precos.compra'] } },
+        comissaoPadrao: { $first: '$concessionaria.comissaoPadrao' },
+        contato: { $first: '$concessionaria.contato' },
+        whatsapp: { $first: '$concessionaria.whatsapp' },
+        cidade: { $first: '$concessionaria.cidade' },
+      }},
+      { $sort: { valorTotal: -1 } },
+    ]);
+    res.json(success(data));
+  } catch (err) { next(err); }
+});
+
 module.exports = router;

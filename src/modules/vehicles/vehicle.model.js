@@ -91,6 +91,22 @@ const vehicleSchema = new mongoose.Schema(
       ultimoCalculo: Date,
     },
     leads: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Lead' }],
+    // Origem do veiculo
+    origem: {
+      type: String,
+      enum: ['particular', 'concessionaria'],
+      default: 'particular',
+      index: true,
+    },
+    // Dados da concessionaria (se origem = concessionaria)
+    concessionaria: {
+      nome: String,
+      contato: String,
+      whatsapp: String,
+      cidade: String,
+      comissaoPadrao: Number,    // % da margem, ex: 30 = 30%
+      dataParceria: Date,
+    },
     cadastradoPor: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
