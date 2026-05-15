@@ -110,9 +110,24 @@ class ScoreCalculator {
   avaliarEngajamento() {
     const leads = this.vehicle.leads?.length || 0;
     const temLeads = leads > 0;
+    const cliques = this.vehicle.anuncio?.cliques || 0;
 
-    this.addCriterio('Interesse de Compradores', temLeads ? 10 : 0, 10, temLeads, `${leads} leads`);
-    this.total += temLeads ? 10 : 0;
+    // Leads: ate 5 pontos
+    let ptsLeads = 0;
+    if (leads >= 3) ptsLeads = 5;
+    else if (leads >= 1) ptsLeads = 3;
+
+    // Cliques: ate 5 pontos
+    let ptsCliques = 0;
+    if (cliques >= 100) ptsCliques = 5;
+    else if (cliques >= 50) ptsCliques = 3;
+    else if (cliques >= 10) ptsCliques = 1;
+
+    this.addCriterio('Interesse de Compradores', ptsLeads, 5, ptsLeads >= 3, `${leads} leads`);
+    this.total += ptsLeads;
+
+    this.addCriterio('Cliques no Anuncio', ptsCliques, 5, ptsCliques >= 3, `${cliques} cliques`);
+    this.total += ptsCliques;
   }
 
   addCriterio(nome, pontos, maximo, atingido, observacao = '') {
