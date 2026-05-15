@@ -1,9 +1,6 @@
 const vehicleService = require('./vehicle.service');
-const vehicleRepository = require('./vehicle.repository');
-const ScoreCalculator = require('./vehicle.score');
 const { createVehicleSchema, updateVehicleSchema, updateStatusSchema } = require('./vehicle.schema');
 const { success, paginated } = require('../../shared/utils/api-response');
-const { upload, uploadToCloudinary } = require('../../shared/middlewares/upload.middleware');
 const logger = require('../../config/logger');
 
 class VehicleController {
@@ -110,6 +107,10 @@ class VehicleController {
    */
   async uploadPhotos(req, res, next) {
     try {
+      const vehicleRepository = require('./vehicle.repository');
+      const ScoreCalculator = require('./vehicle.score');
+      const { uploadToCloudinary } = require('../../shared/middlewares/upload.middleware');
+      
       const vehicle = await vehicleService.getVehicleById(req.params.id, req.user.id);
 
       if (!req.files || req.files.length === 0) {
