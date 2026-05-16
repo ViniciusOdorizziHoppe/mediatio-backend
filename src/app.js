@@ -106,6 +106,7 @@ loadRoute('./modules/leads/lead.routes', '/api/leads');
 loadRoute('./modules/appointments/appointment.routes', '/api/appointments');
 loadRoute('./modules/analytics/analytics.routes', '/api/analytics');
 loadRoute('./modules/integrations/fipe/fipe.routes', '/api/fipe');
+loadRoute('./modules/integrations/morph/morph.routes', '/api/morph');
 
 // ── 404 Handler ───────────────────────────────────────────────
 app.use((req, res) => {
